@@ -1,0 +1,78 @@
+import base64
+
+import pytest
+from fastapi.testclient import TestClient
+from nacl.signing import SigningKey
+from sqlmodel import Session
+
+from app import crypto
+from app.db import get_session
+from app.main import app
+from app.routers import allowance as allowance_router
+from app.services import spend as spend_mod
+from tests.fakes import FakePayPal, make_engine
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    engine, pp = make_engine(tmp_path), FakePayPal()
+    monkeypatch.setattr(spend_mod, "get_paypal_client", lambda: pp)
+    monkeypatch.setattr(allowance_router, "get_paypal_client", lambda: pp)
+    spend_mod._locks.clear()
+
+    def sess():
+        with Session(engine) as s:
+            yield s
+
+    app.dependency_overrides[get_session] = sess
+    yield TestClient(app), pp
+    app.dependency_overrides.clear()
+
+
+def body(amount, category):
+    return {"amount": amount, "category": category, "merchant_name": "Cafe"}
+
+
+def test_full_lifecycle(client):
+    c, pp = client
+    pol = {"allowed_categories": ["food"], "per_tx_max": 10, "require_approval_above": 6}
+    pid = c.post("/policy", json={"raw_text": "t", "policy": pol}).json()["id"]
+    r = c.post("/allowance", json={"policy_id": pid, "amount": 20}).json()
+    aid = r["allowance_id"]
+    assert r["approve_url"].startswith("https://paypal.test")
+
+    pub = base64.b64encode(bytes(SigningKey.generate().verify_key)).decode()
+    auth = c.post(f"/allowance/{aid}/authorize", json={"device_pubkey_b64": pub}).json()
+    cert = auth["certificate"]
+    assert cert["max_vouchers"] == 4 and cert["per_tap_max"] == 5 and cert["device_pubkey"] == pub
+    assert crypto.verify_server_sig(cert, auth["signature"])
+    assert auth["server_pubkey"] == c.get("/crypto/server-pubkey").json()["pubkey_b64"]
+
+    spend = lambda amt, cat: c.post(f"/allowance/{aid}/test-spend", json=body(amt, cat)).json()
+    assert spend(3, "food")["verdict"]["decision"] == "PASS"
+    r8 = spend(8, "food")
+    assert r8["verdict"]["decision"] == "NEEDS_APPROVAL"
+    assert c.get("/approvals?status=PENDING").json()[0]["id"] == r8["approval_id"]
+    assert c.post(f"/approvals/{r8['approval_id']}/approve").json()["capture_id"]
+    assert c.post(f"/approvals/{r8['approval_id']}/approve").status_code == 409
+    assert spend(4, "alcohol")["verdict"]["decision"] == "FAIL"
+
+    info = c.get(f"/allowance/{aid}").json()
+    assert info["captured_total"] == 11 and info["remaining"] == 9 and info["spent_today"] == 11
+    assert info["certificate"] == cert
+
+    assert c.post(f"/allowance/{aid}/close").json()["status"] == "CLOSED"
+    assert pp.voided == ["AUTH1"]
+    assert spend(1, "food")["verdict"]["decision"] == "FAIL"
+
+
+def test_deny_and_bad_pubkey(client):
+    c, _ = client
+    pid = c.post("/policy", json={"raw_text": "t", "policy": {"require_approval_above": 1}}).json()["id"]
+    aid = c.post("/allowance", json={"policy_id": pid, "amount": 20}).json()["allowance_id"]
+    assert c.post(f"/allowance/{aid}/authorize", json={"device_pubkey_b64": "AAAA"}).status_code == 422
+    c.post(f"/allowance/{aid}/authorize", json={"device_pubkey_b64": base64.b64encode(bytes(32)).decode()})
+    ap = c.post(f"/allowance/{aid}/test-spend", json=body(5, "food")).json()
+    d = c.post(f"/approvals/{ap['approval_id']}/deny")
+    assert d.json()["status"] == "DENIED"
+    assert c.post(f"/approvals/{ap['approval_id']}/approve").status_code == 409

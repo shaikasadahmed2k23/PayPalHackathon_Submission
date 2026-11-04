@@ -241,3 +241,14 @@ class PayPalClient:
         )
         header = data["batch_header"]
         return header["payout_batch_id"], header["batch_status"]
+
+
+_client: Optional[PayPalClient] = None
+
+
+def get_paypal_client() -> PayPalClient:
+    """Shared client so the cached access token is reused across requests."""
+    global _client
+    if _client is None:
+        _client = PayPalClient()
+    return _client

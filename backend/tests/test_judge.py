@@ -136,6 +136,18 @@ def test_multiple_failures_are_all_reported():
     assert len(v.reasons) == 6
 
 
+def test_blocked_category_does_not_also_report_not_allowed():
+    p = make_policy(allowed_categories=["food"], blocked_categories=["alcohol"])
+    v = judge(p, spend(5, category="alcohol"), ctx())
+    assert v.reasons == ["Alcohol is blocked by your rules"]
+
+
+def test_skip_approval_passes_but_fail_rules_still_apply():
+    assert judge(make_policy(), spend(12), ctx(), skip_approval=True).decision == "PASS"
+    v = judge(make_policy(), spend(25), ctx(), skip_approval=True)
+    assert v.decision == "FAIL"
+
+
 def test_fail_beats_needs_approval():
     v = judge(make_policy(), spend(25), ctx())
     assert v.decision == "FAIL"

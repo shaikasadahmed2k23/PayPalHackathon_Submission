@@ -33,10 +33,17 @@ class PurchaseStatus(str, Enum):
 
 class Actor(str, Enum):
     USER = "user"
+    SYSTEM = "system"
     SHOPPING_AGENT = "shopping_agent"
     POLICY_JUDGE = "policy_judge"
     SETTLEMENT_AGENT = "settlement_agent"
     MERCHANT = "merchant"
+
+
+class ApprovalStatus(str, Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    DENIED = "DENIED"
 
 
 class Policy(SQLModel, table=True):
@@ -111,3 +118,31 @@ class AuditLog(SQLModel, table=True):
     reasons: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     paypal_ref: Optional[str] = None
     payload_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+
+
+class LedgerEntry(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    allowance_id: int = Field(foreign_key="allowance.id", index=True)
+    amount: float
+    category: str
+    merchant_name: str
+    channel: str  # online | offline
+    source: str  # purchase | voucher | manual
+    source_id: Optional[str] = None
+    capture_id: Optional[str] = None
+    refunded_amount: float = 0.0
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class Approval(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    allowance_id: int = Field(foreign_key="allowance.id", index=True)
+    amount: float
+    category: str
+    merchant_name: str
+    channel: str
+    source: str
+    source_id: Optional[str] = None
+    status: ApprovalStatus = ApprovalStatus.PENDING
+    created_at: datetime = Field(default_factory=utcnow)
+    decided_at: Optional[datetime] = None

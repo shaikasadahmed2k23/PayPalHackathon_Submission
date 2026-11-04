@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     llm_provider: str = "gemini"  # gemini | groq
     gemini_api_key: str = ""
     groq_api_key: str = ""
+    server_signing_key: str = ""  # base64 32-byte Ed25519 seed
+    frontend_url: str = "http://localhost:3000"
+
     gemini_model: str = "gemini-2.5-flash"
     groq_model: str = "llama-3.3-70b-versatile"
 
