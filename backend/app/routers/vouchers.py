@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from app.agents.settlement_agent import SettlementReport, settle
+from app.agents.settlement_agent import RetryReport, SettlementReport, retry_payouts, settle
 from app.db import get_session
 from app.models import Merchant, Voucher
 from app.services.voucher_verify import OfflinePayment, verify_offline_payment
@@ -38,6 +38,13 @@ async def settle_vouchers(body: SettleIn, session: Session = Depends(get_session
         return await settle(session, body.merchant_id, body.payments)
     except LookupError as e:
         raise HTTPException(404, str(e)) from e
+
+
+@router.post("/retry-payouts")
+async def retry_pending_payouts(
+    allowance_id: Optional[int] = None, session: Session = Depends(get_session)
+) -> RetryReport:
+    return await retry_payouts(session, allowance_id)
 
 
 @router.get("")

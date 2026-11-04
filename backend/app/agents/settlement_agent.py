@@ -6,6 +6,7 @@ reviews the finished batch for anomalies and never changes a decision.
 
 import asyncio
 import json
+import logging
 from datetime import datetime
 from typing import Any, Literal, Optional
 
@@ -25,6 +26,7 @@ from app.services.voucher_verify import (
     verify_offline_payment,
 )
 
+logger = logging.getLogger("leashpay.settlement")
 REPLAY_REASON = "Voucher already used (possible screenshot replay)"
 
 
@@ -130,6 +132,28 @@ def _audit_item(session: Session, merchant: Merchant, p: OfflinePayment, item: R
     )
 
 
+async def _pay_out(merchant: Merchant, voucher: Voucher, request_id: str) -> Optional[str]:
+    """Pay the merchant for a captured voucher; sets voucher status/payout fields.
+    Returns an error message, or None on success. request_id is the idempotent sender_batch_id."""
+    try:
+        if not merchant.paypal_email:
+            raise PayPalError(0, "Merchant has no PayPal email — set MERCHANT_PAYOUT_EMAIL")
+        batch_id, _ = await get_paypal_client().payout(
+            merchant.paypal_email, voucher.amount, sender_batch_id=request_id,
+            note=f"LeashPay voucher {voucher.allowance_id}-{voucher.serial} at {merchant.name}",
+        )
+    except PayPalError as e:
+        error = e.message if e.status == 0 else str(e)
+        voucher.status = VoucherStatus.SETTLED_PAYOUT_PENDING
+        voucher.judge_reasons = [f"Payout failed: {error}"]
+        logger.warning("Payout for voucher %s failed: %s", request_id, error)
+        return error
+    voucher.status = VoucherStatus.SETTLED
+    voucher.payout_batch_id = batch_id
+    voucher.judge_reasons = []
+    return None
+
+
 async def _settle_one(session: Session, merchant: Merchant, p: OfflinePayment) -> ReportItem:
     reasons: list[str] = []
     if p.merchant_id != merchant.id:
@@ -179,20 +203,12 @@ async def _settle_one(session: Session, merchant: Merchant, p: OfflinePayment) -
     session.add(voucher)
     session.commit()  # money is captured: record it before attempting the payout
     item = ReportItem(serial=serial, amount=p.amount, status="SETTLED", capture_id=result.capture_id)
-    try:
-        batch_id, _ = await get_paypal_client().payout(
-            merchant.paypal_email, p.amount, sender_batch_id=request_id,
-            note=f"LeashPay voucher {aid}-{serial} at {merchant.name}",
-        )
-        voucher.payout_batch_id = batch_id
-        voucher.status = VoucherStatus.SETTLED
-        item.payout_batch_id = batch_id
-    except PayPalError as e:
+    error = await _pay_out(merchant, voucher, request_id)
+    if error:
         # Keep the capture on record; the merchant is still owed this money.
-        voucher.status = VoucherStatus.SETTLED_PAYOUT_PENDING
-        voucher.judge_reasons = [f"Payout failed: {e}"]
         item.status = "SETTLED_PAYOUT_PENDING"
         item.reasons = voucher.judge_reasons
+    item.payout_batch_id = voucher.payout_batch_id
     session.add(voucher)
     session.commit()
     _audit_item(session, merchant, p, item)
@@ -213,7 +229,8 @@ async def _ai_review(
         r = await asyncio.to_thread(generate_json, _REVIEW_SYSTEM, json.dumps(batch), _LLMReview)
         review, note = AIReview(risk=r.risk, findings=r.findings), r.findings
     except Exception as e:  # advisory only: nothing here may break settlement
-        review, note = AIReview(risk="unknown"), [f"AI review unavailable: {e}"]
+        logger.warning("AI review failed: %s: %s", type(e).__name__, e)
+        review, note = AIReview(risk="unknown"), [f"AI review unavailable: {type(e).__name__}: {e}"]
     audit.log(
         session, "settlement_agent", "anomaly_review", verdict=review.risk, reasons=note,
         payload={"merchant_id": merchant.id, "vouchers": len(batch)},
@@ -250,3 +267,41 @@ async def settle(session: Session, merchant_id: int, payments: list[OfflinePayme
     )
     report.summary = _summary(merchant, report)
     return report
+
+
+class RetryReport(BaseModel):
+    retried: int
+    settled: int
+    still_pending: int
+    items: list[ReportItem]
+
+
+async def retry_payouts(session: Session, allowance_id: Optional[int] = None) -> RetryReport:
+    """Retry payouts for captured vouchers. Same sender_batch_id as the first attempt,
+    so PayPal treats a repeat as the same payout rather than a second one."""
+    q = select(Voucher).where(Voucher.status == VoucherStatus.SETTLED_PAYOUT_PENDING)
+    if allowance_id is not None:
+        q = q.where(Voucher.allowance_id == allowance_id)
+    items: list[ReportItem] = []
+    for voucher in session.exec(q.order_by(Voucher.id)).all():  # type: ignore[arg-type]
+        merchant = session.get(Merchant, voucher.merchant_id)
+        allowance = session.get(Allowance, voucher.allowance_id)
+        if merchant is None or allowance is None:
+            continue
+        error = await _pay_out(merchant, voucher, make_request_id(allowance, "voucher", voucher.serial))
+        session.add(voucher)
+        session.commit()
+        item = ReportItem(
+            serial=voucher.serial, amount=voucher.amount, status=voucher.status.value,
+            reasons=voucher.judge_reasons, capture_id=voucher.capture_id,
+            payout_batch_id=voucher.payout_batch_id,
+        )
+        audit.log(
+            session, "settlement_agent", "retry_payout", verdict=item.status,
+            reasons=[error] if error else [], paypal_ref=item.payout_batch_id or item.capture_id,
+            payload={"allowance_id": voucher.allowance_id, "serial": voucher.serial,
+                     "merchant_id": merchant.id},
+        )
+        items.append(item)
+    still = sum(i.status == "SETTLED_PAYOUT_PENDING" for i in items)
+    return RetryReport(retried=len(items), settled=len(items) - still, still_pending=still, items=items)

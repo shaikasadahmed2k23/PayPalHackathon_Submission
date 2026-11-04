@@ -77,3 +77,26 @@ def test_classifier_uses_cache_and_falls_back(monkeypatch):
 
     monkeypatch.setattr(llm, "_call_provider", boom)
     assert classifier.classify_category("Mystery thing") == "other"
+
+
+def test_llm_failures_are_logged_with_type_and_message(monkeypatch, caplog):
+    import logging
+
+    def explode(system, user, schema):
+        raise RuntimeError("quota exceeded")
+
+    monkeypatch.setattr(llm, "_call_gemini", explode)
+    monkeypatch.setattr(llm.get_settings(), "llm_provider", "gemini")
+    with caplog.at_level(logging.WARNING, logger="leashpay.llm"), pytest.raises(LLMError) as ei:
+        generate_json("s", "u", parser._LLMParse)
+    assert "RuntimeError: quota exceeded" in str(ei.value)
+    assert "RuntimeError: quota exceeded" in caplog.text
+
+
+def test_invalid_output_is_logged(monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setattr(llm, "_call_provider", lambda s, u, schema: '{"policy": {"per_tx_max": -1}}')
+    with caplog.at_level(logging.WARNING, logger="leashpay.llm"), pytest.raises(LLMError):
+        generate_json("s", "u", parser._LLMParse)
+    assert "invalid _LLMParse output" in caplog.text

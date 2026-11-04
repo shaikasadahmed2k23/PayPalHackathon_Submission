@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -10,6 +11,8 @@ from app.seed import seed_if_empty
 from app.paypal import PayPalError
 from app.routers import allowance, approvals, crypto, merchants, policy, vouchers
 from sqlmodel import Session
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
 
 
 @asynccontextmanager

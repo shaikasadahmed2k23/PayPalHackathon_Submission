@@ -1,6 +1,8 @@
 """All PayPal REST calls live here and nowhere else."""
 
 import asyncio
+import json
+import logging
 import time
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Optional
@@ -10,6 +12,8 @@ import httpx
 from app.config import get_settings
 
 Money = Decimal | float | int | str
+
+logger = logging.getLogger("leashpay.paypal")
 
 
 class PayPalError(Exception):
@@ -30,16 +34,23 @@ class PayPalError(Exception):
         self.debug_id = debug_id
         super().__init__(str(self))
 
+    @staticmethod
+    def _detail(d: dict[str, Any]) -> str:
+        """One entry of PayPal's `details`: 'field: issue - description'."""
+        head = ": ".join(str(d[k]) for k in ("field", "issue") if d.get(k))
+        if d.get("description") and d.get("description") != d.get("issue"):
+            head = f"{head} - {d['description']}" if head else str(d["description"])
+        return head
+
     def __str__(self) -> str:
         parts = [f"PayPal {self.status}"]
         if self.name:
             parts.append(self.name)
         parts.append(self.message)
         text = ": ".join(parts)
-        issues = [d.get("issue") or d.get("description") for d in self.details]
-        issues = [i for i in issues if i]
+        issues = [self._detail(d) for d in self.details]
         if issues:
-            text += f" [{'; '.join(issues)}]"
+            text += f" [{'; '.join(i for i in issues if i)}]"
         if self.debug_id:
             text += f" (debug_id={self.debug_id})"
         return text
@@ -218,26 +229,28 @@ class PayPalClient:
 
         PayPal rejects a reused sender_batch_id, so it doubles as idempotency.
         """
-        data = await self._request(
-            "POST",
-            "/v1/payments/payouts",
-            {
-                "sender_batch_header": {
-                    "sender_batch_id": sender_batch_id,
-                    "email_subject": "You received a LeashPay payment",
-                    "email_message": note,
-                },
-                "items": [
-                    {
-                        "recipient_type": "EMAIL",
-                        "receiver": receiver_email,
-                        "amount": self._money(amount),
-                        "note": note,
-                        "sender_item_id": sender_batch_id,
-                    }
-                ],
+        # Payouts v1 differs from v2: amount uses "currency", not "currency_code".
+        amount_obj = {"value": fmt_amount(amount), "currency": self.currency}
+        payload = {
+            "sender_batch_header": {
+                "sender_batch_id": sender_batch_id,
+                "recipient_type": "EMAIL",
+                "email_subject": "You received a LeashPay payment",
+                "email_message": note,
             },
-            request_id=sender_batch_id,
+            "items": [
+                {
+                    "recipient_type": "EMAIL",
+                    "amount": amount_obj,
+                    "receiver": receiver_email,
+                    "note": note,
+                    "sender_item_id": sender_batch_id,
+                }
+            ],
+        }
+        logger.info("PayPal payout payload: %s", json.dumps(payload))
+        data = await self._request(
+            "POST", "/v1/payments/payouts", payload, request_id=sender_batch_id
         )
         header = data["batch_header"]
         return header["payout_batch_id"], header["batch_status"]

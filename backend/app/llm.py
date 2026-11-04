@@ -1,6 +1,7 @@
 """All LLM calls live here and nowhere else."""
 
 import json
+import logging
 from typing import TypeVar
 
 import httpx
@@ -10,6 +11,7 @@ from app.config import get_settings
 
 T = TypeVar("T", bound=BaseModel)
 
+logger = logging.getLogger("leashpay.llm")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
@@ -75,10 +77,12 @@ def _call_provider(system: str, user: str, schema: type[BaseModel]) -> str:
             return _call_gemini(system, user, schema)
         if provider == "groq":
             return _call_groq(system, user, schema)
-    except LLMError:
+    except LLMError as e:
+        logger.warning("%s call failed: %s", provider, e)
         raise
     except Exception as e:  # SDK / network errors
-        raise LLMError(f"{provider} call failed: {e}") from e
+        logger.warning("%s call failed: %s: %s", provider, type(e).__name__, e)
+        raise LLMError(f"{provider} call failed: {type(e).__name__}: {e}") from e
     raise LLMError(f"Unknown LLM_PROVIDER: {provider!r}")
 
 
@@ -92,6 +96,7 @@ def generate_json(system: str, user: str, schema: type[T]) -> T:
             return schema.model_validate_json(raw)
         except ValidationError as e:
             last_error = str(e)
+            logger.warning("LLM returned invalid %s output: %s | raw=%r", schema.__name__, last_error, raw[:500])
             prompt = (
                 f"{user}\n\nYour previous answer was invalid:\n{raw}\n"
                 f"Validation errors:\n{last_error}\nReturn corrected JSON only."

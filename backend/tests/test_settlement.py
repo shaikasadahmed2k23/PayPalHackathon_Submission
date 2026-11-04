@@ -205,3 +205,73 @@ def test_late_sync_after_allowance_expiry_settles_via_agent(env):
                      issued_at=z(exp - timedelta(hours=2)))
     report = run_settle(engine, chai, [p])
     assert report.items[0].status == "SETTLED", report.items[0].reasons
+
+
+def test_missing_merchant_email_fails_before_calling_paypal(env):
+    engine, pp, aid = env
+    chai = merchant_id(engine, "Chai Corner")
+    with Session(engine) as s:
+        m = s.get(Merchant, chai)
+        m.paypal_email = ""
+        s.add(m)
+        s.commit()
+    item = run_settle(engine, chai, [payment(aid, chai, 0, 3.0)]).items[0]
+    assert item.status == "SETTLED_PAYOUT_PENDING" and item.capture_id
+    assert item.reasons == ["Payout failed: Merchant has no PayPal email — set MERCHANT_PAYOUT_EMAIL"]
+    assert pp.payouts == []
+
+
+def run_retry(engine, allowance_id=None):
+    async def go():
+        with Session(engine) as s:
+            return await agent.retry_payouts(s, allowance_id)
+    return asyncio.run(go())
+
+
+def test_retry_payouts_reuses_sender_batch_id_and_settles(env):
+    engine, pp, aid = env
+    pp.payout_error = PayPalError(400, "Invalid request", name="VALIDATION_ERROR")
+    chai, taco = merchant_id(engine, "Chai Corner"), merchant_id(engine, "Taco Truck")
+    run_settle(engine, chai, [payment(aid, chai, 0, 3.0)])
+    run_settle(engine, taco, [payment(aid, taco, 1, 4.0)])
+    assert pp.payouts == []
+
+    still = run_retry(engine, aid)  # PayPal still failing
+    assert (still.retried, still.settled, still.still_pending) == (2, 0, 2)
+
+    pp.payout_error = None
+    report = run_retry(engine, aid)
+    assert (report.retried, report.settled, report.still_pending) == (2, 2, 0)
+    assert [p["batch"] for p in pp.payouts] == ["voucher-AUTH1-0", "voucher-AUTH1-1"]  # same ids as first try
+    with Session(engine) as s:
+        vs = s.exec(select(Voucher).order_by(Voucher.serial)).all()
+        assert all(v.status.value == "SETTLED" and v.payout_batch_id and v.judge_reasons == [] for v in vs)
+        assert len(pp.captures) == 2  # no second capture
+        assert s.get(Allowance, aid).captured_total == 7.0
+    assert run_retry(engine, aid).retried == 0  # nothing left to retry
+    assert len(pp.payouts) == 2
+
+
+def test_retry_only_touches_the_given_allowance(env):
+    engine, pp, aid = env
+    pp.payout_error = PayPalError(400, "x")
+    chai = merchant_id(engine, "Chai Corner")
+    run_settle(engine, chai, [payment(aid, chai, 0, 3.0)])
+    pp.payout_error = None
+    assert run_retry(engine, aid + 99).retried == 0
+    assert run_retry(engine, aid).settled == 1
+
+
+def test_ai_review_failure_reason_is_audited_with_exception_type(env, monkeypatch):
+    engine, pp, aid = env
+
+    def boom(*a):
+        raise LLMError("gemini call failed: ServerError: 503 overloaded")
+
+    monkeypatch.setattr(agent, "generate_json", boom)
+    chai = merchant_id(engine, "Chai Corner")
+    run_settle(engine, chai, [payment(aid, chai, 0, 3.0)])
+    with Session(engine) as s:
+        a = s.exec(select(AuditLog).where(AuditLog.action == "anomaly_review")).one()
+        assert a.verdict == "unknown"
+        assert a.reasons == ["AI review unavailable: LLMError: gemini call failed: ServerError: 503 overloaded"]
