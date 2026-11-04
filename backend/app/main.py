@@ -5,14 +5,18 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.db import init_db
+from app.db import engine, init_db
+from app.seed import seed_if_empty
 from app.paypal import PayPalError
-from app.routers import allowance, approvals, crypto, policy
+from app.routers import allowance, approvals, crypto, merchants, policy, vouchers
+from sqlmodel import Session
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     init_db()
+    with Session(engine) as session:
+        seed_if_empty(session)
     yield
 
 
@@ -31,6 +35,8 @@ app.include_router(policy.router)
 app.include_router(crypto.router)
 app.include_router(allowance.router)
 app.include_router(approvals.router)
+app.include_router(merchants.router)
+app.include_router(vouchers.router)
 
 
 @app.exception_handler(PayPalError)

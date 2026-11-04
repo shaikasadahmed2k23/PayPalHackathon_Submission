@@ -8,9 +8,12 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app import audit
-from app.models import Allowance, AllowanceStatus, Approval, LedgerEntry, Policy as PolicyRow
+from app.models import (
+    Allowance, AllowanceStatus, Approval, LedgerEntry, Policy as PolicyRow, Voucher,
+)
 from app.paypal import PayPalError, get_paypal_client
 from app.policy.judge import judge
+from app.services.voucher_verify import parse_ts
 from app.policy.schema import Check, Policy, SpendContext, SpendRequest, Verdict
 
 _locks: dict[int, asyncio.Lock] = {}
@@ -39,11 +42,30 @@ def compute_spent_today(session: Session, allowance_id: int) -> float:
     )
 
 
-def _inactive_reason(a: Allowance) -> Optional[str]:
+def make_request_id(allowance: Allowance, kind: str, key: object) -> str:
+    """Idempotency key built from the PayPal authorization id: unique even across DB resets,
+    identical on retry."""
+    return f"{kind}-{allowance.authorization_id}-{key}"
+
+
+def _voucher_issued_before_expiry(session: Session, a: Allowance, source_id: Optional[str]) -> bool:
+    """Late sync: a voucher issued before the certificate expired stays valid after it."""
+    try:
+        voucher = session.get(Voucher, int(source_id or ""))
+        expires = parse_ts((a.certificate or {})["certificate"]["expires_at"])
+    except (ValueError, KeyError, TypeError):
+        return False
+    return voucher is not None and _as_utc(voucher.issued_at) <= expires
+
+
+def _inactive_reason(
+    session: Session, a: Allowance, source: str, source_id: Optional[str]
+) -> Optional[str]:
     if a.status != AllowanceStatus.ACTIVE:
         return f"This allowance is {a.status.value.lower()}, not active"
     if a.expires_at and _as_utc(a.expires_at) <= datetime.now(timezone.utc):
-        return "This allowance has expired"
+        if not (source == "voucher" and _voucher_issued_before_expiry(session, a, source_id)):
+            return "This allowance has expired"
     if not a.authorization_id:
         return "This allowance has no PayPal authorization"
     return None
@@ -76,7 +98,7 @@ async def spend(
             spent_today=spent_today,
             allowance_remaining=max(round(allowance.amount - allowance.captured_total, 2), 0.0),
         )
-        reason = _inactive_reason(allowance)
+        reason = _inactive_reason(session, allowance, source, source_id)
         if reason:
             verdict = Verdict(
                 decision="FAIL",

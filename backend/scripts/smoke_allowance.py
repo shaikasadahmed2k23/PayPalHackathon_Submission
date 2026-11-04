@@ -74,7 +74,7 @@ def main() -> None:
     show("allowance before close", {k: info[k] for k in
          ("status", "amount", "captured_total", "remaining", "spent_today")})
 
-    closed = call(api, "POST", f"/allowance/{aid}/close")
+    closed = call(api, "POST", f"/allowance/{aid}/close", params={"force": "true"})
     show("closed", closed)
 
     async def final_status() -> str:

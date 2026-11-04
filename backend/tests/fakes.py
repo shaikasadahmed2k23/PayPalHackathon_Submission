@@ -2,6 +2,7 @@ import asyncio
 
 from sqlmodel import Session, SQLModel, create_engine
 
+from app.paypal import PayPalError
 from app.models import Allowance, AllowanceStatus, Policy as PolicyRow
 
 
@@ -9,6 +10,9 @@ class FakePayPal:
     def __init__(self) -> None:
         self.captures: list[dict] = []
         self.voided: list[str] = []
+        self.payouts: list[dict] = []
+        self.payout_error: PayPalError | None = None
+        self.capture_error: PayPalError | None = None
 
     async def create_allowance_order(self, amount, return_url, cancel_url):
         return "ORDER1", "https://paypal.test/approve"
@@ -17,9 +21,17 @@ class FakePayPal:
         return "AUTH1"
 
     async def capture(self, authorization_id, amount, final, request_id):
+        if self.capture_error:
+            raise self.capture_error
         await asyncio.sleep(0.02)  # force interleaving between concurrent spends
         self.captures.append(dict(auth=authorization_id, amount=amount, final=final, request_id=request_id))
         return f"CAP{len(self.captures)}", "COMPLETED"
+
+    async def payout(self, receiver_email, amount, sender_batch_id, note):
+        if self.payout_error:
+            raise self.payout_error
+        self.payouts.append(dict(to=receiver_email, amount=amount, batch=sender_batch_id))
+        return f"PAYOUT-{sender_batch_id}", "PENDING"
 
     async def void(self, authorization_id):
         self.voided.append(authorization_id)
@@ -42,3 +54,5 @@ def seed_allowance(engine, amount=20.0, policy=None, **allowance_kw) -> int:
         s.add(a)
         s.commit()
         return a.id
+
+

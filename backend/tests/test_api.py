@@ -1,4 +1,5 @@
 import base64
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,6 +26,7 @@ def client(tmp_path, monkeypatch):
             yield s
 
     app.dependency_overrides[get_session] = sess
+    pp.engine = engine  # lets tests seed rows directly
     yield TestClient(app), pp
     app.dependency_overrides.clear()
 
@@ -45,6 +47,7 @@ def test_full_lifecycle(client):
     auth = c.post(f"/allowance/{aid}/authorize", json={"device_pubkey_b64": pub}).json()
     cert = auth["certificate"]
     assert cert["max_vouchers"] == 4 and cert["per_tap_max"] == 5 and cert["device_pubkey"] == pub
+    assert cert["allowed_categories"] == ["food"] and cert["blocked_categories"] == []
     assert crypto.verify_server_sig(cert, auth["signature"])
     assert auth["server_pubkey"] == c.get("/crypto/server-pubkey").json()["pubkey_b64"]
 
@@ -61,7 +64,7 @@ def test_full_lifecycle(client):
     assert info["captured_total"] == 11 and info["remaining"] == 9 and info["spent_today"] == 11
     assert info["certificate"] == cert
 
-    assert c.post(f"/allowance/{aid}/close").json()["status"] == "CLOSED"
+    assert c.post(f"/allowance/{aid}/close?force=true").json()["status"] == "CLOSED"
     assert pp.voided == ["AUTH1"]
     assert spend(1, "food")["verdict"]["decision"] == "FAIL"
 
@@ -76,3 +79,48 @@ def test_deny_and_bad_pubkey(client):
     d = c.post(f"/approvals/{ap['approval_id']}/deny")
     assert d.json()["status"] == "DENIED"
     assert c.post(f"/approvals/{ap['approval_id']}/approve").status_code == 409
+
+
+def _active_allowance(c, per_tap=5):
+    pid = c.post("/policy", json={"raw_text": "t", "policy": {"offline": {"per_tap_max": per_tap}}}).json()["id"]
+    aid = c.post("/allowance", json={"policy_id": pid, "amount": 20}).json()["allowance_id"]
+    pub = base64.b64encode(bytes(32)).decode()
+    c.post(f"/allowance/{aid}/authorize", json={"device_pubkey_b64": pub})
+    return aid
+
+
+def test_close_needs_force_while_vouchers_may_be_unsynced(client):
+    c, pp = client
+    aid = _active_allowance(c)
+    st = c.get(f"/allowance/{aid}/offline-status").json()
+    assert st == {"max_vouchers": 4, "settled": 0, "rejected": 0, "unknown_serials": [0, 1, 2, 3]}
+    r = c.post(f"/allowance/{aid}/close")
+    assert r.status_code == 409
+    assert "4 offline vouchers not yet synced" in r.json()["detail"]["message"]
+    assert pp.voided == [] and c.get(f"/allowance/{aid}").json()["status"] == "ACTIVE"
+    assert c.post(f"/allowance/{aid}/close?force=true").status_code == 200
+    assert pp.voided == ["AUTH1"]
+
+
+def test_close_without_force_when_every_serial_is_accounted_for(client):
+    from app.models import Voucher, VoucherStatus
+    c, pp = client
+    aid = _active_allowance(c)
+    with Session(pp.engine) as s:
+        for serial, status in enumerate([VoucherStatus.SETTLED, VoucherStatus.SETTLED_PAYOUT_PENDING,
+                                         VoucherStatus.REJECTED, VoucherStatus.SETTLED]):
+            s.add(Voucher(allowance_id=aid, serial=serial, merchant_id=1, amount=1, signature="s",
+                          issued_at=datetime.now(timezone.utc), status=status))
+        s.commit()
+    st = c.get(f"/allowance/{aid}/offline-status").json()
+    assert st["settled"] == 3 and st["rejected"] == 1 and st["unknown_serials"] == []
+    assert c.post(f"/allowance/{aid}/close").status_code == 200
+
+
+def test_close_without_force_when_offline_disabled(client):
+    c, _ = client
+    pid = c.post("/policy", json={"raw_text": "t", "policy": {"offline": {"enabled": False}}}).json()["id"]
+    aid = c.post("/allowance", json={"policy_id": pid, "amount": 20}).json()["allowance_id"]
+    c.post(f"/allowance/{aid}/authorize", json={"device_pubkey_b64": base64.b64encode(bytes(32)).decode()})
+    assert c.get(f"/allowance/{aid}/offline-status").json()["max_vouchers"] == 0
+    assert c.post(f"/allowance/{aid}/close").status_code == 200

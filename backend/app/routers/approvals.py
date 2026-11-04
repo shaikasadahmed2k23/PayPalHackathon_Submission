@@ -6,8 +6,8 @@ from sqlmodel import Session, select
 
 from app import audit
 from app.db import get_session
-from app.models import Approval, ApprovalStatus
-from app.services.spend import SpendResult, spend
+from app.models import Allowance, Approval, ApprovalStatus
+from app.services.spend import SpendResult, make_request_id, spend
 
 router = APIRouter(prefix="/approvals", tags=["approvals"])
 
@@ -34,10 +34,12 @@ def list_approvals(
 @router.post("/{approval_id}/approve")
 async def approve(approval_id: int, session: Session = Depends(get_session)) -> SpendResult:
     ap = _get_pending(session, approval_id)
+    allowance = session.get(Allowance, ap.allowance_id)
+    assert allowance is not None
     # Same spend path as everything else; only the approval threshold is waived.
     result = await spend(
         session, ap.allowance_id, ap.amount, ap.category, ap.merchant_name, ap.channel,
-        source=ap.source, source_id=ap.source_id, request_id=f"approval-{ap.id}",
+        source=ap.source, source_id=ap.source_id, request_id=make_request_id(allowance, "approval", ap.id),
         skip_approval=True,
     )
     if result.verdict.decision != "PASS":

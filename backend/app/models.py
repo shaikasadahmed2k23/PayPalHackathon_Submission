@@ -21,6 +21,7 @@ class AllowanceStatus(str, Enum):
 class VoucherStatus(str, Enum):
     PENDING = "PENDING"
     SETTLED = "SETTLED"
+    SETTLED_PAYOUT_PENDING = "SETTLED_PAYOUT_PENDING"  # captured, merchant payout failed
     REJECTED = "REJECTED"
 
 

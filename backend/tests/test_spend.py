@@ -129,3 +129,67 @@ def test_lock_prevents_overspend_under_concurrency(env):
     assert len(pp.captures) == 1
     with Session(engine) as s:
         assert s.get(Allowance, aid).captured_total == 6.0
+
+
+# ---- request ids and late offline sync -------------------------------------------------
+
+def _voucher_env(engine, issued_delta_h, expired=True):
+    """Expired allowance whose certificate expired 1h ago; one voucher issued `issued_delta_h` from then."""
+    from app.models import Voucher
+    exp = datetime.now(timezone.utc) - timedelta(hours=1)
+    cert = {"certificate": {"expires_at": exp.strftime("%Y-%m-%dT%H:%M:%SZ")}, "signature": "x"}
+    aid = seed_allowance(engine, expires_at=exp, certificate=cert)
+    with Session(engine) as s:
+        v = Voucher(allowance_id=aid, serial=0, merchant_id=1, amount=3.0, signature="s",
+                    issued_at=exp + timedelta(hours=issued_delta_h))
+        s.add(v)
+        s.commit()
+        return aid, str(v.id)
+
+
+def run_voucher_spend(engine, aid, source, source_id):
+    async def go():
+        with Session(engine) as s:
+            return await spend_mod.spend(s, aid, 3.0, "food", "Cafe", "offline",
+                                         source=source, source_id=source_id, request_id="rid")
+    return asyncio.run(go())
+
+
+def test_late_voucher_issued_before_expiry_still_settles(env):
+    engine, pp = env
+    aid, vid = _voucher_env(engine, issued_delta_h=-2)
+    r = run_voucher_spend(engine, aid, "voucher", vid)
+    assert r.verdict.decision == "PASS" and len(pp.captures) == 1
+
+
+def test_late_voucher_issued_after_expiry_fails(env):
+    engine, pp = env
+    aid, vid = _voucher_env(engine, issued_delta_h=+1)
+    r = run_voucher_spend(engine, aid, "voucher", vid)
+    assert r.verdict.decision == "FAIL" and "expired" in r.verdict.reasons[0]
+
+
+def test_expiry_stays_strict_for_non_voucher_spends(env):
+    engine, pp = env
+    aid, vid = _voucher_env(engine, issued_delta_h=-2)
+    assert run_voucher_spend(engine, aid, "manual", vid).verdict.decision == "FAIL"
+    assert pp.captures == []
+
+
+def test_late_voucher_on_closed_allowance_fails(env):
+    engine, pp = env
+    aid, vid = _voucher_env(engine, issued_delta_h=-2)
+    with Session(engine) as s:
+        a = s.get(Allowance, aid)
+        a.status = AllowanceStatus.CLOSED
+        s.add(a)
+        s.commit()
+    r = run_voucher_spend(engine, aid, "voucher", vid)
+    assert r.verdict.decision == "FAIL" and "closed" in r.verdict.reasons[0]
+
+
+def test_request_id_uses_authorization_id_not_local_id(env):
+    engine, _ = env
+    aid = seed_allowance(engine)
+    with Session(engine) as s:
+        assert spend_mod.make_request_id(s.get(Allowance, aid), "voucher", 7) == "voucher-AUTH1-7"
