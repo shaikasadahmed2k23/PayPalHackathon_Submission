@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 
 from app import audit
 from app.db import get_session
-from app.models import Allowance, Approval, ApprovalStatus
+from app.models import Allowance, Approval, ApprovalStatus, Purchase, PurchaseStatus
 from app.services.spend import SpendResult, make_request_id, spend
 
 router = APIRouter(prefix="/approvals", tags=["approvals"])
@@ -19,6 +19,24 @@ def _get_pending(session: Session, approval_id: int) -> Approval:
     if ap.status != ApprovalStatus.PENDING:
         raise HTTPException(409, f"Approval is already {ap.status.value}")
     return ap
+
+
+def _sync_purchase(
+    session: Session, ap: Approval, status: PurchaseStatus, capture_id: Optional[str],
+    reasons: Optional[list[str]],
+) -> None:
+    """An approval created by the shopping agent points at its Purchase via source_id."""
+    if ap.source != "purchase" or not (ap.source_id or "").isdigit():
+        return
+    purchase = session.get(Purchase, int(ap.source_id))  # type: ignore[arg-type]
+    if purchase is None:
+        return
+    purchase.status = status
+    if capture_id:
+        purchase.capture_id = capture_id
+    if reasons:
+        purchase.judge_reasons = reasons
+    session.add(purchase)
 
 
 @router.get("")
@@ -47,6 +65,7 @@ async def approve(approval_id: int, session: Session = Depends(get_session)) -> 
             409, {"message": "Approval can no longer be spent", "reasons": result.verdict.reasons}
         )
     ap.status = ApprovalStatus.APPROVED
+    _sync_purchase(session, ap, PurchaseStatus.CAPTURED, result.capture_id, None)
     ap.decided_at = datetime.now(timezone.utc)
     session.add(ap)
     session.commit()
@@ -59,6 +78,7 @@ async def approve(approval_id: int, session: Session = Depends(get_session)) -> 
 def deny(approval_id: int, session: Session = Depends(get_session)) -> Approval:
     ap = _get_pending(session, approval_id)
     ap.status = ApprovalStatus.DENIED
+    _sync_purchase(session, ap, PurchaseStatus.BLOCKED, None, ["You denied this purchase"])
     ap.decided_at = datetime.now(timezone.utc)
     session.add(ap)
     session.commit()

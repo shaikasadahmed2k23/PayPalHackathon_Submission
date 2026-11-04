@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from app.db import engine, init_db
 from app.seed import seed_if_empty
 from app.paypal import PayPalError
-from app.routers import allowance, approvals, crypto, merchants, policy, vouchers
+from app.routers import agent, allowance, approvals, crypto, merchants, policy, vouchers
 from sqlmodel import Session
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
@@ -40,6 +40,7 @@ app.include_router(allowance.router)
 app.include_router(approvals.router)
 app.include_router(merchants.router)
 app.include_router(vouchers.router)
+app.include_router(agent.router)
 
 
 @app.exception_handler(PayPalError)

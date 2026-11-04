@@ -25,6 +25,8 @@ PRODUCTS = [
     ("City Ride", 6.00, "transport", "Rickshaw Rides"),
     ("Airport Ride", 15.00, "transport", "Rickshaw Rides"),
     ("IPA Pint", 6.00, "alcohol", "Craft Beer Tent"),
+    ("Craft IPA 6-Pack", 12.00, "alcohol", "Craft Beer Tent"),
+    ("Lager 6-Pack", 10.00, "alcohol", "Craft Beer Tent"),
     ("Phone Charger", 12.00, "electronics", "Gadget Stall"),
     ("Earbuds", 25.00, "electronics", "Gadget Stall"),
 ]
@@ -43,9 +45,10 @@ def seed_if_empty(session: Session, payout_email: Optional[str] = None) -> None:
                 m.paypal_email = email
                 session.add(m)
         session.commit()
-    if not session.exec(select(Product)).first():
-        ids = {m.name: m.id for m in session.exec(select(Merchant)).all()}
-        for name, price, category, merchant in PRODUCTS:
-            if merchant in ids:
-                session.add(Product(name=name, price=price, category=category, merchant_id=ids[merchant]))
-        session.commit()
+    # Add any demo products that are missing (also tops up an older database).
+    ids = {m.name: m.id for m in session.exec(select(Merchant)).all()}
+    have = {(p.name, p.merchant_id) for p in session.exec(select(Product)).all()}
+    for name, price, category, merchant in PRODUCTS:
+        if merchant in ids and (name, ids[merchant]) not in have:
+            session.add(Product(name=name, price=price, category=category, merchant_id=ids[merchant]))
+    session.commit()

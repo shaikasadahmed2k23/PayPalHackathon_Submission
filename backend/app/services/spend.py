@@ -29,6 +29,16 @@ def _lock_for(allowance_id: int) -> asyncio.Lock:
     return _locks.setdefault(allowance_id, asyncio.Lock())
 
 
+allowance_lock = _lock_for  # public name for other services that must serialise per allowance
+
+
+def get_spend_context(session: Session, allowance: Allowance) -> SpendContext:
+    return SpendContext(
+        spent_today=compute_spent_today(session, allowance.id),  # type: ignore[arg-type]
+        allowance_remaining=max(round(allowance.amount - allowance.captured_total, 2), 0.0),
+    )
+
+
 def _as_utc(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)  # SQLite drops tzinfo
 
@@ -93,11 +103,7 @@ async def spend(
             raise LookupError(f"Allowance {allowance_id} not found")
         session.refresh(allowance)  # another request may have captured since we loaded it
 
-        spent_today = compute_spent_today(session, allowance_id)
-        context = SpendContext(
-            spent_today=spent_today,
-            allowance_remaining=max(round(allowance.amount - allowance.captured_total, 2), 0.0),
-        )
+        context = get_spend_context(session, allowance)
         reason = _inactive_reason(session, allowance, source, source_id)
         if reason:
             verdict = Verdict(

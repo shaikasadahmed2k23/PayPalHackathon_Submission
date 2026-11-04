@@ -12,7 +12,7 @@ GOOD = """{"policy": {"per_tx_max": 15, "require_approval_above": 8,
 
 
 def test_parse_rules_builds_summary_and_applies_defaults(monkeypatch):
-    monkeypatch.setattr(llm, "_call_provider", lambda s, u, schema: GOOD)
+    monkeypatch.setattr(llm, "_call_provider", lambda p, s, u, schema: GOOD)
     result = parser.parse_rules("Food and transport only, max $15, never alcohol, ask above $8")
     p = result.policy
     assert p.per_tx_max == 15 and p.require_approval_above == 8
@@ -26,7 +26,7 @@ def test_parse_rules_builds_summary_and_applies_defaults(monkeypatch):
 def test_parse_rules_receives_user_text(monkeypatch):
     seen = {}
 
-    def fake(system, user, schema):
+    def fake(provider, system, user, schema):
         seen["system"], seen["user"] = system, user
         return GOOD
 
@@ -38,13 +38,13 @@ def test_parse_rules_receives_user_text(monkeypatch):
 
 def test_retry_once_on_invalid_then_succeed(monkeypatch):
     answers = iter(['{"policy": {"per_tx_max": -5}}', GOOD])
-    monkeypatch.setattr(llm, "_call_provider", lambda s, u, schema: next(answers))
+    monkeypatch.setattr(llm, "_call_provider", lambda p, s, u, schema: next(answers))
     assert parser.parse_rules("x").policy.per_tx_max == 15
 
 
 def test_raises_llm_error_after_two_invalid(monkeypatch):
     calls = []
-    monkeypatch.setattr(llm, "_call_provider", lambda s, u, schema: calls.append(1) or "not json")
+    monkeypatch.setattr(llm, "_call_provider", lambda p, s, u, schema: calls.append(1) or "not json")
     with pytest.raises(LLMError):
         generate_json("s", "u", parser._LLMParse)
     assert len(calls) == 2
@@ -63,7 +63,7 @@ def test_classifier_uses_cache_and_falls_back(monkeypatch):
     classifier._cache.clear()
     calls = []
 
-    def fake(system, user, schema):
+    def fake(provider, system, user, schema):
         calls.append(user)
         return '{"category": "Groceries"}'
 
@@ -72,7 +72,7 @@ def test_classifier_uses_cache_and_falls_back(monkeypatch):
     assert classifier.classify_category(" bananas ") == "groceries"
     assert len(calls) == 1
 
-    def boom(system, user, schema):
+    def boom(provider, system, user, schema):
         raise LLMError("down")
 
     monkeypatch.setattr(llm, "_call_provider", boom)
@@ -96,7 +96,7 @@ def test_llm_failures_are_logged_with_type_and_message(monkeypatch, caplog):
 def test_invalid_output_is_logged(monkeypatch, caplog):
     import logging
 
-    monkeypatch.setattr(llm, "_call_provider", lambda s, u, schema: '{"policy": {"per_tx_max": -1}}')
+    monkeypatch.setattr(llm, "_call_provider", lambda p, s, u, schema: '{"policy": {"per_tx_max": -1}}')
     with caplog.at_level(logging.WARNING, logger="leashpay.llm"), pytest.raises(LLMError):
         generate_json("s", "u", parser._LLMParse)
     assert "invalid _LLMParse output" in caplog.text

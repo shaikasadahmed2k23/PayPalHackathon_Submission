@@ -17,7 +17,8 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./leashpay.db"
 
-    llm_provider: str = "gemini"  # gemini | groq
+    llm_provider: str = "gemini"  # primary: gemini | groq
+    llm_fallback: str = ""  # secondary; "" = the other provider (if its key is set), "none" = off
     gemini_api_key: str = ""
     groq_api_key: str = ""
     server_signing_key: str = ""  # base64 32-byte Ed25519 seed

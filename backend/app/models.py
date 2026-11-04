@@ -30,6 +30,7 @@ class PurchaseStatus(str, Enum):
     PENDING_APPROVAL = "PENDING_APPROVAL"
     BLOCKED = "BLOCKED"
     REFUNDED = "REFUNDED"
+    PARTIALLY_REFUNDED = "PARTIALLY_REFUNDED"
 
 
 class Actor(str, Enum):

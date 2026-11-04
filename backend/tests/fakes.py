@@ -11,6 +11,8 @@ class FakePayPal:
         self.captures: list[dict] = []
         self.voided: list[str] = []
         self.payouts: list[dict] = []
+        self.refunds: list[dict] = []
+        self.refund_error: PayPalError | None = None
         self.payout_error: PayPalError | None = None
         self.capture_error: PayPalError | None = None
 
@@ -26,6 +28,12 @@ class FakePayPal:
         await asyncio.sleep(0.02)  # force interleaving between concurrent spends
         self.captures.append(dict(auth=authorization_id, amount=amount, final=final, request_id=request_id))
         return f"CAP{len(self.captures)}", "COMPLETED"
+
+    async def refund(self, capture_id, amount, request_id):
+        if self.refund_error:
+            raise self.refund_error
+        self.refunds.append(dict(capture=capture_id, amount=amount, request_id=request_id))
+        return f"REF{len(self.refunds)}", "COMPLETED"
 
     async def payout(self, receiver_email, amount, sender_batch_id, note):
         if self.payout_error:
