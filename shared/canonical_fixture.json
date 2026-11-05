@@ -1,0 +1,31 @@
+{
+ "input": {
+  "serial": 2,
+  "issued_at": "2026-11-05T12:00:00Z",
+  "per_tap_max": 5.0,
+  "price": 4.5,
+  "tiny": 0.25,
+  "zero": 0.0,
+  "neg": -3.0,
+  "flag": true,
+  "nothing": null,
+  "name": "Caf\u00e9 \u2603 \ud83d\ude00 \"q\" \\ \n \u007f",
+  "allowed_categories": [
+   "food",
+   "transport"
+  ],
+  "blocked_categories": [],
+  "nested": {
+   "z": 1.0,
+   "a": [
+    3.0,
+    {
+     "y": 2,
+     "b": 1.5
+    }
+   ],
+   "m": {}
+  }
+ },
+ "expected": "{\"allowed_categories\":[\"food\",\"transport\"],\"blocked_categories\":[],\"flag\":true,\"issued_at\":\"2026-11-05T12:00:00Z\",\"name\":\"Caf\\u00e9 \\u2603 \\ud83d\\ude00 \\\"q\\\" \\\\ \\n \\u007f\",\"neg\":-3,\"nested\":{\"a\":[3,{\"b\":1.5,\"y\":2}],\"m\":{},\"z\":1},\"nothing\":null,\"per_tap_max\":5,\"price\":4.5,\"serial\":2,\"tiny\":0.25,\"zero\":0}"
+}

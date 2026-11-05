@@ -29,11 +29,12 @@ Proven working in sandbox (`test_hold.py`): authorize $20 → capture $3 → cap
 ## Offline security model (must implement exactly)
 - On allowance creation, the buyer device generates an **Ed25519 keypair** (`@noble/ed25519`). Private key stays on device (IndexedDB). Public key sent to backend.
 - Backend issues an **Allowance Certificate** signed with the server Ed25519 key (`PyNaCl`):
-  `{allowance_id, device_pubkey, per_tap_max, max_vouchers, blocked_categories, expires_at}`
+  `{allowance_id, device_pubkey, per_tap_max, max_vouchers, allowed_categories, blocked_categories, expires_at}`
   - `max_vouchers = floor(allowance_amount / per_tap_max)` → total offline exposure can never exceed the hold.
+- **OfflinePayment** (phone -> server) = `{certificate, cert_signature, voucher, device_signature, amount, merchant_id, scanned_at}`; all signatures are over `canonical_json` (integral floats serialised as ints). Only authentic vouchers (both signatures valid) are stored, even when rejected; unauthentic ones appear only in the settlement report + audit log.
 - **Voucher** = `{allowance_id, serial (int, increments), issued_at}` signed by the device key. Voucher QR = cert + voucher + signature. QR rotates every 30s or after each use.
 - Merchant app verifies **offline**: server signature on cert (server pubkey cached in app), device signature on voucher, `serial < max_vouchers`, `amount ≤ per_tap_max`, merchant category not in `blocked_categories`, serial not already in local queue, not expired.
-- Server at settlement: re-verify all signatures, `UNIQUE(allowance_id, serial)` in DB, policy checks, then capture with header `PayPal-Request-Id: voucher-{allowance_id}-{serial}` (PayPal-level idempotency = no double charge).
+- Server at settlement: re-verify all signatures, `UNIQUE(allowance_id, serial)` in DB, policy checks, then capture with header `PayPal-Request-Id: voucher-{authorization_id}-{serial}` (PayPal authorization id, not the local id, so keys stay unique across DB resets; PayPal-level idempotency = no double charge). Payouts use the same string as `sender_batch_id`. Late sync: a voucher issued before the certificate expired may still settle after the allowance expires, as long as the allowance is ACTIVE (not CLOSED)..
 - Known limitation (document in README, don't over-engineer): a screenshot of the QR could be presented to two merchants; the server accepts the first and rejects the second; exposure is bounded by `per_tap_max`.
 
 ## Policy Judge — design rule (IMPORTANT)
@@ -82,9 +83,11 @@ Always send `PayPal-Request-Id` on POSTs that move money.
 - `Allowance`: id, policy_id, amount, captured_total, paypal_order_id, authorization_id, status (`CREATED|APPROVED|ACTIVE|CLOSED|EXPIRED`), device_pubkey, certificate (json), expires_at
 - `Merchant`: id, name, category, paypal_email
 - `Product` (demo store): id, name, price, category, merchant_id
-- `Voucher`: id, allowance_id, serial, merchant_id, amount, signature, issued_at, scanned_at, status (`PENDING|SETTLED|REJECTED`), capture_id, payout_batch_id, judge_reasons
-- `Purchase` (online agent): id, allowance_id, items_json, amount, status (`CAPTURED|PENDING_APPROVAL|BLOCKED|REFUNDED`), capture_id, judge_reasons
-- `AuditLog`: id, ts, actor (`user|shopping_agent|policy_judge|settlement_agent|merchant`), action, verdict, reasons, paypal_ref, payload_json
+- `Voucher`: id, allowance_id, serial, merchant_id, amount, signature, issued_at, scanned_at, status (`PENDING|SETTLED|SETTLED_PAYOUT_PENDING|REJECTED`), capture_id, payout_batch_id, judge_reasons
+- `Purchase` (online agent): id, allowance_id, items_json, amount, status (`CAPTURED|PENDING_APPROVAL|BLOCKED|REFUNDED|PARTIALLY_REFUNDED`; linked to its Approval/LedgerEntry via `source_id = purchase.id`; `items_json` lines hold DB prices + `refunded_qty`), capture_id, judge_reasons
+- `LedgerEntry`: id, allowance_id, amount, category, merchant_name, channel, source (`purchase|voucher|manual`), source_id, capture_id, refunded_amount, created_at
+- `Approval`: id, allowance_id, amount, category, merchant_name, channel, source, source_id, status (`PENDING|APPROVED|DENIED`), created_at, decided_at
+- `AuditLog`: id, ts, actor (`user|system|shopping_agent|policy_judge|settlement_agent|merchant`), action, verdict, reasons, paypal_ref, payload_json
 
 ## Folder structure
 ```
@@ -98,6 +101,7 @@ leashpay/
       paypal.py          # all PayPal REST calls live here only
       llm.py             # all LLM calls live here only
       crypto.py          # server keys, cert signing, voucher verification
+      services/spend.py  # THE single place money moves (judge -> capture/approval -> ledger -> audit)
       policy/ parser.py  judge.py
       agents/ shopping_agent.py  settlement_agent.py
       routers/ policy.py allowance.py vouchers.py agent.py approvals.py audit.py merchants.py

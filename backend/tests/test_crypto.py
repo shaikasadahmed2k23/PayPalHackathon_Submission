@@ -47,3 +47,23 @@ def test_server_key_generated_once_then_reused(tmp_path):
     assert bytes(crypto.load_signing_key("", path)) == bytes(k1)
     seed = base64.b64encode(bytes(range(32))).decode()
     assert bytes(crypto.load_signing_key(seed, tmp_path / "other")) == bytes(range(32))
+
+
+def test_canonical_json_matches_the_shared_fixture_used_by_the_frontend():
+    """frontend/lib/canonical.test.ts checks the SAME file; if either side drifts, one test fails."""
+    import json
+    from pathlib import Path
+    fx = json.loads((Path(__file__).resolve().parents[2] / "shared" / "canonical_fixture.json").read_text(encoding="utf-8"))
+    assert crypto.canonical_json(fx["input"]).decode("ascii") == fx["expected"]
+
+
+def test_signed_fixture_verifies_with_the_backend_and_frontend_uses_the_same_bytes():
+    """Cert signed by the server key, voucher by the device key (fixed seeds). The frontend test
+    verifies the same signatures with @noble/ed25519 and re-signs the voucher to get the same bytes."""
+    import json
+    from pathlib import Path
+    fx = json.loads((Path(__file__).resolve().parents[2] / "shared" / "signed_fixture.json").read_text(encoding="utf-8"))
+    assert crypto._verify(fx["server_pubkey_b64"], fx["certificate"], fx["cert_signature"])
+    assert crypto.verify_device_sig(fx["certificate"]["device_pubkey"], fx["voucher"], fx["device_signature"])
+    assert not crypto.verify_device_sig(fx["certificate"]["device_pubkey"], {**fx["voucher"], "serial": 3},
+                                        fx["device_signature"])

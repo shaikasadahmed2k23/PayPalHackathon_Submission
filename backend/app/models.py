@@ -109,6 +109,13 @@ class Purchase(SQLModel, table=True):
     status: PurchaseStatus
     capture_id: Optional[str] = None
     judge_reasons: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: Optional[datetime] = Field(default_factory=utcnow)  # NULL on rows from older DBs
+
+
+class IssuedMark(SQLModel, table=True):
+    """Highest voucher serial the buyer's wallet says it has shown (-1 = none yet)."""
+    allowance_id: int = Field(foreign_key="allowance.id", primary_key=True)
+    highest_serial: int = -1
 
 
 class AuditLog(SQLModel, table=True):

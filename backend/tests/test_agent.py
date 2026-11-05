@@ -121,6 +121,17 @@ def test_budget_is_enforced_in_code(env):
     assert r.skipped[0].item == "Popcorn" and "budget" in r.skipped[0].reasons[0]
 
 
+def test_budget_trimmed_items_collapse_into_one_line(env):
+    engine, pp, llm, aid = env
+    llm.intent = {"intent": "buy", "budget": 4}
+    llm.plan = {"items": [{"product_id": pid(engine, n), "qty": 1}
+                          for n in ("Potato Chips", "Popcorn", "Cookies", "Craft IPA 6-Pack")]}
+    r = chat(engine, aid)
+    assert "Kept it under $4.00 - left out 3 extras (" in r.reply
+    assert r.reply.count("It would put the cart over") == 0 and "I skipped" not in r.reply
+    assert len(r.skipped) == 3  # structured detail is still there
+
+
 def test_hallucinated_product_id_is_ignored(env):
     engine, pp, llm, aid = env
     llm.plan = {"items": [{"product_id": 9999, "qty": 1}, {"product_id": pid(engine, "Cookies"), "qty": 1}]}

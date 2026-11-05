@@ -93,7 +93,8 @@ def test_close_needs_force_while_vouchers_may_be_unsynced(client):
     c, pp = client
     aid = _active_allowance(c)
     st = c.get(f"/allowance/{aid}/offline-status").json()
-    assert st == {"max_vouchers": 4, "settled": 0, "rejected": 0, "unknown_serials": [0, 1, 2, 3]}
+    assert st == {"max_vouchers": 4, "settled": 0, "rejected": 0, "highest_issued": None,
+                  "exact": False, "unknown_serials": [0, 1, 2, 3]}
     r = c.post(f"/allowance/{aid}/close")
     assert r.status_code == 409
     assert "4 offline vouchers not yet synced" in r.json()["detail"]["message"]
@@ -124,3 +125,54 @@ def test_close_without_force_when_offline_disabled(client):
     c.post(f"/allowance/{aid}/authorize", json={"device_pubkey_b64": base64.b64encode(bytes(32)).decode()})
     assert c.get(f"/allowance/{aid}/offline-status").json()["max_vouchers"] == 0
     assert c.post(f"/allowance/{aid}/close").status_code == 200
+
+
+def test_wallet_reported_serial_makes_unsynced_count_exact(client):
+    from app.models import Voucher, VoucherStatus
+    c, pp = client
+    aid = _active_allowance(c)  # 4 possible serials
+    st = c.post(f"/allowance/{aid}/issued", json={"highest_serial": 1}).json()
+    assert st["exact"] and st["unknown_serials"] == [0, 1] and st["highest_issued"] == 1
+    assert c.post(f"/allowance/{aid}/issued", json={"highest_serial": 0}).json()["highest_issued"] == 1  # never goes down
+    with Session(pp.engine) as s:
+        s.add(Voucher(allowance_id=aid, serial=0, merchant_id=1, amount=1, signature="s",
+                      issued_at=datetime.now(timezone.utc), status=VoucherStatus.SETTLED))
+        s.commit()
+    assert c.get(f"/allowance/{aid}/offline-status").json()["unknown_serials"] == [1]
+    r = c.post(f"/allowance/{aid}/close")
+    assert r.status_code == 409 and r.json()["detail"]["message"].startswith("1 offline vouchers")
+    assert c.post(f"/allowance/{aid}/issued", json={"highest_serial": -1}).status_code == 200
+    assert c.post(f"/allowance/{aid}/issued", json={"highest_serial": -2}).status_code == 422
+
+
+def test_wallet_that_never_showed_a_code_can_close_cleanly(client):
+    c, _ = client
+    aid = _active_allowance(c)
+    c.post(f"/allowance/{aid}/issued", json={"highest_serial": -1})
+    assert c.get(f"/allowance/{aid}/offline-status").json()["unknown_serials"] == []
+    assert c.post(f"/allowance/{aid}/close").status_code == 200
+
+
+def test_activity_feed_merges_sources_newest_first(client):
+    from app.models import Approval, AuditLog, Purchase, PurchaseStatus, Voucher, VoucherStatus
+    c, pp = client
+    aid = _active_allowance(c)
+    t = lambda m: datetime(2026, 11, 5, 12, m, tzinfo=timezone.utc)  # noqa: E731
+    line = {"product_id": 1, "name": "Chips", "qty": 2, "merchant": "Taco Truck"}
+    with Session(pp.engine) as s:
+        s.add(Purchase(allowance_id=aid, items_json=[line], amount=5, status=PurchaseStatus.REFUNDED, created_at=t(1)))
+        s.add(Purchase(allowance_id=aid, items_json=[line], amount=5, status=PurchaseStatus.PENDING_APPROVAL, created_at=t(2)))
+        s.add(Voucher(allowance_id=aid, serial=0, merchant_id=1, amount=3, signature="s", issued_at=t(3),
+                      scanned_at=t(4), status=VoucherStatus.SETTLED))
+        s.add(AuditLog(ts=t(5), actor="shopping_agent", action="refund",
+                       payload_json={"purchase_id": 1, "amount": 5, "items": ["Chips"]}))
+        s.add(Approval(allowance_id=aid, amount=15, category="food", merchant_name="Taco Truck", channel="online",
+                       source="purchase", source_id="2", created_at=t(6)))
+        s.add(Approval(allowance_id=aid, amount=9, category="food", merchant_name="Old", channel="online",
+                       source="manual", status="APPROVED", created_at=t(7)))  # approved: shown via its spend, not here
+        s.commit()
+    feed = c.get(f"/allowance/{aid}/activity").json()
+    assert [(i["kind"], i["status"]) for i in feed] == [
+        ("approval", "PENDING"), ("refund", "REFUNDED"), ("voucher", "SETTLED"), ("purchase", "REFUNDED")]
+    assert feed[3]["detail"] == "2x Chips" and feed[3]["title"] == "Taco Truck"
+    assert c.get("/allowance/999/activity").status_code == 404

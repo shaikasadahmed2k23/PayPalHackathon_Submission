@@ -229,8 +229,10 @@ async def _buy(
     def total(keys: list[int]) -> float:
         return round(sum(catalog[i]["price"] * wanted[i] for i in keys), 2)
 
+    trimmed: list[str] = []  # dropped to fit the user's budget; reported as one line
     while turn.budget > 0 and ids and total(ids) > turn.budget:
         dropped = ids.pop()
+        trimmed.append(catalog[dropped]["name"])
         skipped.append(SkippedOut(item=catalog[dropped]["name"],
                                   reasons=[f"It would put the cart over your {_m(turn.budget)} budget"]))
     if not ids:
@@ -314,8 +316,13 @@ async def _buy(
         session.commit()
         purchases.append(purchase_out(session, purchase))
 
+    if trimmed:
+        n = len(trimmed)
+        lines_out.append(f"Kept it under {_m(turn.budget)} - left out {n} extra{'s' if n > 1 else ''} "
+                         f"({', '.join(reversed(trimmed))}).")
     for s in skipped:
-        lines_out.append(f"I skipped {s.item}: {'; '.join(s.reasons)}.")
+        if s.item not in trimmed:  # rule-blocked groups stay as separate lines
+            lines_out.append(f"I skipped {s.item}: {'; '.join(s.reasons)}.")
     lines_out.append(f"Total charged now: {_m(charged)}.")
     return AgentReply(conversation_id="", reply=" ".join(lines_out), intent="buy",
                       purchases=purchases, skipped=skipped)

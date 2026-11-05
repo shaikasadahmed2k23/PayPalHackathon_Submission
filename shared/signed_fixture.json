@@ -1,0 +1,26 @@
+{
+ "server_seed_b64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+ "device_seed_b64": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8=",
+ "server_pubkey_b64": "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=",
+ "certificate": {
+  "allowance_id": 7,
+  "device_pubkey": "Kay64UG8yvCyLhqU000LxzYeUm0L/hLIl5S8kyKWbdc=",
+  "per_tap_max": 5.0,
+  "max_vouchers": 6,
+  "allowed_categories": [
+   "food",
+   "transport"
+  ],
+  "blocked_categories": [
+   "alcohol"
+  ],
+  "expires_at": "2026-11-08T12:00:00Z"
+ },
+ "cert_signature": "xANVpX4JJQuvIJ0GAgvBRsXwDlP7SV5B/DXnL3NiC8i11ddBxNKkAAEsBYlMj5GouG/z84B4hoB5oO4D8g5VAg==",
+ "voucher": {
+  "allowance_id": 7,
+  "serial": 2,
+  "issued_at": "2026-11-05T12:00:00Z"
+ },
+ "device_signature": "oZG98y+7ZFemvV7f7yw4J22cUGY5aSlNXVlc2eaRnrLBiF0bWwRUyJeP8spjkg7Nkb2ml4XtuGX5W24GQdb9Bg=="
+}
