@@ -5,8 +5,20 @@ import { ErrorNote, Shell } from "@/components/Shell";
 import { api, money } from "@/lib/api";
 import type { ParsedPolicy } from "@/lib/types";
 
-const EXAMPLE =
-  "Food and rides only, max $20 per purchase and $60 a day. Ask me before anything over $10. No alcohol, no gadgets. Offline taps up to $5.";
+const EXAMPLES = [
+  {
+    label: "Festival day",
+    text: "Food and rides only, max $20 per purchase and $60 a day. Ask me before anything over $10. No alcohol, no gadgets. Offline taps up to $5.",
+  },
+  {
+    label: "Groceries only",
+    text: "Groceries and food only, max $40 per purchase and $100 a day. Ask me before anything over $25. No alcohol, no gambling. Offline taps up to $10.",
+  },
+  {
+    label: "Kid's allowance",
+    text: "Snacks and transport only, max $8 per purchase and $15 a day. Ask me before anything over $5. No alcohol, no electronics, no gambling. Offline taps up to $3.",
+  },
+];
 
 export default function Setup() {
   const [text, setText] = useState("");
@@ -54,17 +66,33 @@ export default function Setup() {
       </div>
 
       <textarea
-        className="field min-h-36 resize-none leading-relaxed"
-        placeholder={EXAMPLE}
+        className="field min-h-36 resize-none leading-relaxed placeholder:italic placeholder:text-muted/50"
+        placeholder="e.g. Food and rides only, max $20 per purchase, no alcohol…"
         value={text}
         onChange={(e) => {
           setText(e.target.value);
           setParsed(null);
         }}
       />
+      <div className="-mt-2 flex flex-wrap gap-2">
+        {EXAMPLES.map((ex) => (
+          <button
+            key={ex.label}
+            type="button"
+            className="chip border border-line !px-3 !py-1.5 hover:text-text"
+            onClick={() => {
+              setText(ex.text);
+              setParsed(null);
+            }}
+          >
+            {ex.label}
+          </button>
+        ))}
+      </div>
       <button className="btn btn-primary" disabled={!text.trim() || busy !== null} onClick={understand}>
         {busy === "parse" ? "Reading your rules…" : "Understand my rules"}
       </button>
+      {!text.trim() && <p className="-mt-3 text-center text-xs text-muted">Write your rules first</p>}
 
       <ErrorNote>{error}</ErrorNote>
 

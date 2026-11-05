@@ -31,6 +31,8 @@ export default function Wallet() {
   const [showQr, setShowQr] = useState(false);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [dev, setDev] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const reportIssued = useCallback(async (w: WalletRecord) => {
     try {
@@ -63,6 +65,7 @@ export default function Wallet() {
 
   // First load: wallet from IndexedDB (works offline), then last snapshot, then live data.
   useEffect(() => {
+    setDev(new URLSearchParams(window.location.search).get("dev") === "1");
     (async () => {
       const w = await currentWallet();
       if (!w) {
@@ -216,7 +219,19 @@ export default function Wallet() {
             <p className="label">Up to</p>
             <p className="num text-5xl text-accent">{money(cert.per_tap_max)}</p>
             <p className="mt-1 text-sm text-muted">per tap · show this to the seller</p>
-            <button className="btn mt-5 w-full" disabled={!hasMoreCodes(wallet)} onClick={nextCode}>
+            {dev && (
+              <button
+                className="btn btn-sm mt-4 w-full"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(JSON.stringify(payload)); // exact string encoded in the QR
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                }}
+              >
+                {copied ? "Copied" : "Copy code"}
+              </button>
+            )}
+            <button className="btn mt-3 w-full" disabled={!hasMoreCodes(wallet)} onClick={nextCode}>
               {hasMoreCodes(wallet) ? "Next code" : "No more codes on this allowance"}
             </button>
             <p className="mt-2 text-xs text-muted">The code stays put until you tap Next, so it can&apos;t be used up by accident.</p>
