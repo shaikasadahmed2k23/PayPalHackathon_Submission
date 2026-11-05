@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useOnline } from "@/lib/hooks";
+import { useOnline, useWaking } from "@/lib/hooks";
 
 export function OfflineBadge() {
   const online = useOnline();
@@ -10,6 +10,17 @@ export function OfflineBadge() {
     <span className="rounded-full border border-warn/50 bg-warn/10 px-3 py-1 text-xs font-bold tracking-widest text-warn">
       OFFLINE
     </span>
+  );
+}
+
+export function WakingBanner() {
+  const waking = useWaking();
+  if (!waking) return null;
+  return (
+    <div role="status" className="rounded-2xl border border-info/30 bg-info/10 px-4 py-3 text-sm text-info">
+      <p className="font-semibold">Waking up the server…</p>
+      <p>Free tier: it sleeps when idle and takes ~30 s to start. Retrying automatically.</p>
+    </div>
   );
 }
 
@@ -26,6 +37,7 @@ export function Shell({ title, children, back = true, wide = false }: { title?: 
           {back && title && <span className="label">{title}</span>}
         </div>
       </header>
+      <WakingBanner />
       {children}
     </main>
   );

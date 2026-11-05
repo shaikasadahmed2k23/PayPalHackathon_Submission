@@ -23,10 +23,29 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     server_signing_key: str = ""  # base64 32-byte Ed25519 seed
     frontend_url: str = "http://localhost:3000"
+    app_env: str = "development"  # "production" makes SERVER_SIGNING_KEY mandatory
+    cors_origins: str = "http://localhost:3000"  # comma-separated list of allowed browser origins
     merchant_payout_email: str = ""  # sandbox business account that receives all demo payouts
 
     gemini_model: str = "gemini-2.5-flash"
     groq_model: str = "llama-3.3-70b-versatile"
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env.strip().lower() == "production"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        """Comma-separated CORS_ORIGINS; trailing slashes stripped (browsers send origins without one)."""
+        return [o.strip().rstrip("/") for o in self.cors_origins.split(",") if o.strip()]
+
+
+def check_production_settings(settings: Settings) -> None:
+    """Fail fast: in production a missing signing key would silently mint a throwaway key per deploy."""
+    if settings.is_production and not settings.server_signing_key:
+        raise RuntimeError(
+            "APP_ENV=production requires SERVER_SIGNING_KEY (generate one: python scripts/gen_signing_key.py)"
+        )
 
 
 @lru_cache

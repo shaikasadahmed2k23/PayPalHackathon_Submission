@@ -2,8 +2,12 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
-from sqlalchemy import JSON, Column, UniqueConstraint
+from sqlalchemy import JSON, Column, DateTime, UniqueConstraint
 from sqlmodel import Field, SQLModel
+
+
+# Timezone-aware columns: Postgres stores timestamptz; SQLite ignores the flag (code already treats naive as UTC).
+TZ = DateTime(timezone=True)
 
 
 def utcnow() -> datetime:
@@ -52,7 +56,7 @@ class Policy(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     raw_text: str
     policy_json: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: datetime = Field(default_factory=utcnow, sa_type=TZ)
 
 
 class Allowance(SQLModel, table=True):
@@ -65,7 +69,7 @@ class Allowance(SQLModel, table=True):
     status: AllowanceStatus = AllowanceStatus.CREATED
     device_pubkey: Optional[str] = None
     certificate: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
-    expires_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = Field(default=None, sa_type=TZ)
 
 
 class Merchant(SQLModel, table=True):
@@ -93,8 +97,8 @@ class Voucher(SQLModel, table=True):
     merchant_id: int = Field(foreign_key="merchant.id")
     amount: float
     signature: str
-    issued_at: datetime
-    scanned_at: Optional[datetime] = None
+    issued_at: datetime = Field(sa_type=TZ)
+    scanned_at: Optional[datetime] = Field(default=None, sa_type=TZ)
     status: VoucherStatus = VoucherStatus.PENDING
     capture_id: Optional[str] = None
     payout_batch_id: Optional[str] = None
@@ -109,7 +113,7 @@ class Purchase(SQLModel, table=True):
     status: PurchaseStatus
     capture_id: Optional[str] = None
     judge_reasons: list[str] = Field(default_factory=list, sa_column=Column(JSON))
-    created_at: Optional[datetime] = Field(default_factory=utcnow)  # NULL on rows from older DBs
+    created_at: Optional[datetime] = Field(default_factory=utcnow, sa_type=TZ)  # NULL on rows from older DBs
 
 
 class IssuedMark(SQLModel, table=True):
@@ -120,7 +124,7 @@ class IssuedMark(SQLModel, table=True):
 
 class AuditLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    ts: datetime = Field(default_factory=utcnow, index=True)
+    ts: datetime = Field(default_factory=utcnow, index=True, sa_type=TZ)
     actor: Actor
     action: str
     verdict: Optional[str] = None
@@ -140,7 +144,7 @@ class LedgerEntry(SQLModel, table=True):
     source_id: Optional[str] = None
     capture_id: Optional[str] = None
     refunded_amount: float = 0.0
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: datetime = Field(default_factory=utcnow, sa_type=TZ)
 
 
 class Approval(SQLModel, table=True):
@@ -153,5 +157,5 @@ class Approval(SQLModel, table=True):
     source: str
     source_id: Optional[str] = None
     status: ApprovalStatus = ApprovalStatus.PENDING
-    created_at: datetime = Field(default_factory=utcnow)
-    decided_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=utcnow, sa_type=TZ)
+    decided_at: Optional[datetime] = Field(default=None, sa_type=TZ)

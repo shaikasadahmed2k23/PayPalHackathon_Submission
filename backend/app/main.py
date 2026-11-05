@@ -6,7 +6,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.db import engine, init_db
+from app.config import check_production_settings, get_settings
+from app.db import check_db, engine, init_db
 from app.seed import seed_if_empty
 from app.paypal import PayPalError
 from app.routers import agent, allowance, approvals, audit, crypto, merchants, policy, vouchers
@@ -17,6 +18,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(messa
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    check_production_settings(get_settings())
     init_db()
     with Session(engine) as session:
         seed_if_empty(session)
@@ -27,7 +29,7 @@ app = FastAPI(title="LeashPay", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=get_settings().cors_origin_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -57,5 +59,10 @@ async def paypal_error_handler(_: Request, exc: PayPalError) -> JSONResponse:
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> JSONResponse:
+    """Render's health check: 200 only if the database answers. Reports the dialect, never the URL."""
+    try:
+        return JSONResponse({"status": "ok", "db": check_db()})
+    except Exception:
+        logging.getLogger(__name__).exception("health check: database unreachable")
+        return JSONResponse({"status": "error", "db": "unreachable"}, status_code=503)

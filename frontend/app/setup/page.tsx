@@ -137,7 +137,7 @@ export default function Setup() {
             </div>
             <p className="text-sm text-muted">PayPal holds this; nothing is taken until a purchase passes your rules.</p>
             <PayPalButton disabled={!amountOk || busy !== null} busy={busy === "create"} onClick={create} />
-            {amountOk && <p className="text-center text-sm text-muted">Hold {money(Number(amount))} · you approve on PayPal's secure page</p>}
+            {amountOk && <p className="text-center text-sm text-muted">Hold {money(Number(amount))} · you approve on PayPal&apos;s secure page</p>}
           </section>
         </>
       )}
