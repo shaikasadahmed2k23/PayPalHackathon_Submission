@@ -5,6 +5,28 @@ import { useRouter } from "next/navigation";
 import { OfflineBadge } from "@/components/Shell";
 import { currentWallet } from "@/lib/store";
 
+function Card({ title, sub, onClick, href, primary = false }: { title: string; sub: string; onClick?: () => void; href?: string; primary?: boolean }) {
+  const cls = `btn !min-h-24 !justify-between !rounded-3xl !px-7 text-left ${primary ? "btn-primary" : ""}`;
+  const body = (
+    <>
+      <span>
+        <span className="block text-2xl">{title}</span>
+        <span className={`block text-sm font-medium ${primary ? "opacity-70" : "text-muted"}`}>{sub}</span>
+      </span>
+      <span className="text-3xl">→</span>
+    </>
+  );
+  return href ? (
+    <Link href={href} className={cls}>
+      {body}
+    </Link>
+  ) : (
+    <button onClick={onClick} className={cls}>
+      {body}
+    </button>
+  );
+}
+
 export default function Home() {
   const router = useRouter();
 
@@ -23,7 +45,7 @@ export default function Home() {
         <OfflineBadge />
       </header>
 
-      <section className="py-10">
+      <section className="py-8">
         <h1 className="text-[3.4rem] font-extrabold leading-[0.95] tracking-tighter">
           Your money,
           <br />
@@ -35,28 +57,12 @@ export default function Home() {
       </section>
 
       <section className="flex flex-col gap-3">
-        <button onClick={paying} className="btn btn-primary !min-h-24 !justify-between !rounded-3xl !px-7 text-left">
-          <span>
-            <span className="block text-2xl">I&apos;m paying</span>
-            <span className="block text-sm font-medium opacity-70">Show my code · set up an allowance</span>
-          </span>
-          <span className="text-3xl">→</span>
-        </button>
-        <Link href="/merchant" className="btn !min-h-24 !justify-between !rounded-3xl !px-7">
-          <span>
-            <span className="block text-2xl">I&apos;m selling</span>
-            <span className="block text-sm font-medium text-muted">Scan a code · take a payment</span>
-          </span>
-          <span className="text-3xl">→</span>
+        <Card primary title="Pay" sub="Show my code · set up an allowance" onClick={paying} />
+        <Card title="Sell" sub="Scan a code · take a payment" href="/merchant" />
+        <Card title="Ask the agent" sub="Shop with words, rules enforced" href="/agent" />
+        <Link href="/dashboard" className="mt-3 text-center text-sm text-muted underline-offset-4 hover:underline">
+          Dashboard · audit log &amp; ledger
         </Link>
-        <div className="mt-3 flex justify-center gap-6 text-sm text-muted">
-          <Link href="/agent" className="underline-offset-4 hover:underline">
-            Shopping agent
-          </Link>
-          <Link href="/dashboard" className="underline-offset-4 hover:underline">
-            Dashboard
-          </Link>
-        </div>
       </section>
     </main>
   );

@@ -30,12 +30,7 @@ def judge(
     def add(rule: str, failed: bool, fail_detail: str, pass_detail: str) -> None:
         checks.append(Check(rule=rule, passed=not failed, detail=fail_detail if failed else pass_detail))
 
-    add(
-        "allowance_remaining",
-        amount > remaining,
-        f"{_m(amount)} is more than the {_m(remaining)} left in your allowance",
-        f"{_m(amount)} fits within the {_m(remaining)} left in your allowance",
-    )
+    # Order of reasons: rule violations first, then limits, then what is left in the allowance.
     add(
         "blocked_merchant",
         merchant in {m.strip().lower() for m in policy.blocked_merchants},
@@ -60,6 +55,8 @@ def judge(
             f"{cat_label} is not in your allowed categories ({', '.join(policy.allowed_categories)})",
             f"{cat_label} is an allowed category",
         )
+    if spend.channel == "offline" and not policy.offline.enabled:
+        add("offline_limit", True, "Offline payments are turned off in your rules", "")
     per_tx = _d(policy.per_tx_max)
     add(
         "per_tx_max",
@@ -67,6 +64,14 @@ def judge(
         f"{_m(amount)} is over your {_m(per_tx)} per-purchase limit",
         f"{_m(amount)} is within your {_m(per_tx)} per-purchase limit",
     )
+    if spend.channel == "offline" and policy.offline.enabled:
+        tap = _d(policy.offline.per_tap_max)
+        add(
+            "offline_limit",
+            amount > tap,
+            f"{_m(amount)} is over your {_m(tap)} offline per-tap limit",
+            f"{_m(amount)} is within your {_m(tap)} offline per-tap limit",
+        )
     daily = _d(policy.daily_max)
     add(
         "daily_max",
@@ -74,17 +79,12 @@ def judge(
         f"{_m(amount)} on top of {_m(spent_today)} already spent today goes over your {_m(daily)} daily limit",
         f"{_m(spent_today + amount)} spent today stays within your {_m(daily)} daily limit",
     )
-    if spend.channel == "offline":
-        tap = _d(policy.offline.per_tap_max)
-        if not policy.offline.enabled:
-            add("offline_limit", True, "Offline payments are turned off in your rules", "")
-        else:
-            add(
-                "offline_limit",
-                amount > tap,
-                f"{_m(amount)} is over your {_m(tap)} offline per-tap limit",
-                f"{_m(amount)} is within your {_m(tap)} offline per-tap limit",
-            )
+    add(
+        "allowance_remaining",
+        amount > remaining,
+        f"{_m(amount)} is more than the {_m(remaining)} left in your allowance",
+        f"{_m(amount)} fits within the {_m(remaining)} left in your allowance",
+    )
 
     failed = [c for c in checks if not c.passed]
     if failed:

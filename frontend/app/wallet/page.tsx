@@ -9,7 +9,8 @@ import { api, money } from "@/lib/api";
 import { useOnline } from "@/lib/hooks";
 import { currentWallet, getCache, setCache, type WalletRecord } from "@/lib/store";
 import type { ActivityItem, AllowanceInfo, Approval } from "@/lib/types";
-import { ensureCurrentCode, hasMoreCodes, highestIssued, issueNextCode, qrPayload } from "@/lib/wallet";
+import { pillClass, statusLabel } from "@/lib/status";
+import { ensureCurrentCode, hasMoreCodes, highestIssued, issueNextCode, qrText } from "@/lib/wallet";
 
 interface Snapshot {
   info: AllowanceInfo;
@@ -17,11 +18,6 @@ interface Snapshot {
   activity: ActivityItem[];
   at: string;
 }
-
-const STATUS_TONE: Record<string, string> = {
-  CAPTURED: "chip-ok", SETTLED: "chip-ok", SETTLED_PAYOUT_PENDING: "chip-ok", REFUNDED: "chip-warn",
-  PARTIALLY_REFUNDED: "chip-warn", BLOCKED: "chip-bad", REJECTED: "chip-bad", DENIED: "chip-bad", PENDING: "chip-warn",
-};
 
 export default function Wallet() {
   const router = useRouter();
@@ -33,6 +29,8 @@ export default function Wallet() {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [dev, setDev] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [closing, setClosing] = useState<{ unsynced: number; exact: boolean } | null>(null);
+  const [closedMsg, setClosedMsg] = useState("");
 
   const reportIssued = useCallback(async (w: WalletRecord) => {
     try {
@@ -108,6 +106,33 @@ export default function Wallet() {
     }
   }
 
+  async function startClose() {
+    if (!wallet) return;
+    setError("");
+    try {
+      const st = await api<{ unknown_serials: number[]; exact: boolean }>(`/allowance/${wallet.allowance_id}/offline-status`);
+      setClosing({ unsynced: st.unknown_serials.length, exact: st.exact });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't check offline codes");
+    }
+  }
+
+  async function confirmClose() {
+    if (!wallet) return;
+    setBusyId(-1);
+    try {
+      const r = await api<{ captured_total: number }>(`/allowance/${wallet.allowance_id}/close?force=${(closing?.unsynced ?? 0) > 0}`, { method: "POST", body: {} });
+      const amount = snap?.info.amount ?? 0;
+      setClosedMsg(`Unused ${money(Math.max(amount - r.captured_total, 0))} returned to your PayPal.`);
+      setClosing(null);
+      await refresh(wallet);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't close the allowance");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function decide(a: Approval, action: "approve" | "deny") {
     setBusyId(a.id);
     try {
@@ -125,7 +150,7 @@ export default function Wallet() {
   const cert = wallet.certificate;
   const offlineOn = cert.max_vouchers > 0;
   const info = snap?.info;
-  const payload = qrPayload(wallet);
+  const payload = qrText(wallet);
 
   return (
     <Shell title="Wallet">
@@ -141,14 +166,14 @@ export default function Wallet() {
             <p className="label">Allowance</p>
             <p className="num text-xl">{info ? money(info.amount) : "—"}</p>
           </div>
-          <span className={`chip ${info?.status === "ACTIVE" ? "chip-ok" : ""}`}>{info?.status ?? "…"}</span>
+          <span className={info ? pillClass(info.status) : "chip"}>{info?.status ?? "…"}</span>
         </div>
         {snap && !online && (
           <p className="mt-3 text-xs text-muted">Offline · numbers as of {new Date(snap.at).toLocaleTimeString()}</p>
         )}
       </section>
 
-      <button className="btn btn-primary !min-h-20 !text-xl" disabled={!offlineOn} onClick={openQr}>
+      <button className="btn btn-primary !min-h-20 !text-xl" disabled={!offlineOn || (!!info && info.status !== "ACTIVE")} onClick={openQr}>
         {offlineOn ? "Show to Pay" : "Offline codes are off for this allowance"}
       </button>
 
@@ -185,14 +210,14 @@ export default function Wallet() {
                   {it.kind === "refund" ? "↩ " : it.channel === "offline" ? "◌ " : ""}
                   {it.title}
                 </span>
-                <span className={`num text-lg ${it.kind === "refund" ? "text-ok" : ""}`}>
+                <span className={`num text-lg ${it.kind === "refund" ? "text-info" : ""}`}>
                   {it.kind === "refund" ? "+" : ""}
                   {money(it.amount)}
                 </span>
               </div>
               <div className="mt-1 flex items-center justify-between gap-3 text-sm text-muted">
                 <span className="truncate">{it.detail}</span>
-                <span className={`chip ${STATUS_TONE[it.status] ?? ""}`}>{it.status.replaceAll("_", " ").toLowerCase()}</span>
+                <span className={pillClass(it.status)}>{statusLabel(it.status)}</span>
               </div>
               {it.reasons.length > 0 && ["BLOCKED", "REJECTED"].includes(it.status) && (
                 <p className="mt-2 text-sm text-bad">{it.reasons.join("; ")}</p>
@@ -203,16 +228,46 @@ export default function Wallet() {
         )}
       </section>
 
+      {closedMsg && <p className="rounded-2xl border border-ok/40 bg-ok/10 px-4 py-3 font-semibold text-ok">{closedMsg}</p>}
+
+      {info?.status === "ACTIVE" && (
+        <section className="card space-y-3">
+          {!closing ? (
+            <button className="btn btn-danger w-full" disabled={!online} onClick={startClose}>
+              Close allowance
+            </button>
+          ) : (
+            <>
+              {closing.unsynced > 0 ? (
+                <p className="rounded-2xl border border-warn/40 bg-warn/10 p-3 text-sm text-warn">
+                  {closing.exact ? closing.unsynced : `Up to ${closing.unsynced}`} {closing.unsynced === 1 ? "code" : "codes"} may not be synced yet — those sellers won&apos;t be paid.
+                </p>
+              ) : (
+                <p className="text-sm text-muted">
+                  Every code you showed has been synced. The unused {info ? money(info.remaining) : "balance"} goes back to your PayPal.
+                </p>
+              )}
+              <div className="flex gap-2">
+                <button className="btn flex-1" onClick={() => setClosing(null)}>Cancel</button>
+                <button className="btn btn-danger flex-1" disabled={busyId === -1} onClick={confirmClose}>
+                  {closing.unsynced > 0 ? "Close anyway" : "Close"}
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
       {showQr && payload && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-between overflow-y-auto bg-ink px-6 pb-8 pt-6">
           <div className="flex w-full max-w-md items-center justify-between">
             <span className="chip">Code {wallet.current!.voucher.serial + 1} of {cert.max_vouchers}</span>
-            {!online && <span className="chip chip-warn">OFFLINE</span>}
+            {!online && <span className="pill pill-warn">OFFLINE</span>}
             <button className="btn btn-sm" onClick={() => setShowQr(false)}>Close</button>
           </div>
 
           <div className="w-full max-w-sm rounded-3xl bg-white p-4">
-            <QRCodeSVG value={JSON.stringify(payload)} level="L" marginSize={1} style={{ width: "100%", height: "auto" }} />
+            <QRCodeSVG value={payload} level="L" marginSize={1} style={{ width: "100%", height: "auto" }} />
           </div>
 
           <div className="w-full max-w-sm text-center">
@@ -223,7 +278,7 @@ export default function Wallet() {
               <button
                 className="btn btn-sm mt-4 w-full"
                 onClick={async () => {
-                  await navigator.clipboard.writeText(JSON.stringify(payload)); // exact string encoded in the QR
+                  await navigator.clipboard.writeText(payload); // exact string encoded in the QR
                   setCopied(true);
                   setTimeout(() => setCopied(false), 1500);
                 }}

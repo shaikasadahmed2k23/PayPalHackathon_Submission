@@ -28,6 +28,7 @@ from app.services.voucher_verify import (
 
 logger = logging.getLogger("leashpay.settlement")
 REPLAY_REASON = "Voucher already used (possible screenshot replay)"
+ALREADY_SETTLED = "Already settled earlier"
 
 
 class ReportItem(BaseModel):
@@ -37,6 +38,7 @@ class ReportItem(BaseModel):
     reasons: list[str] = Field(default_factory=list)
     capture_id: Optional[str] = None
     payout_batch_id: Optional[str] = None
+    already: bool = False  # settled by an earlier sync of the same payment; nothing new happened
 
 
 class AIReview(BaseModel):
@@ -50,7 +52,8 @@ class _LLMReview(BaseModel):
 
 
 class SettlementReport(BaseModel):
-    settled: int  # captured from the hold (payout may still be pending)
+    settled: int  # newly captured from the hold (payout may still be pending)
+    already_settled: int = 0  # re-sent payments that an earlier sync had already settled
     rejected: int
     payout_pending: int
     total_settled_amount: float
@@ -161,6 +164,19 @@ async def _settle_one(session: Session, merchant: Merchant, p: OfflinePayment) -
     reasons += verify_offline_payment(p, merchant)
 
     serial, aid = _serial(p), p.voucher.get("allowance_id")
+
+    # Idempotent re-sync: the identical, authentic payment (same merchant, same amount) that an
+    # earlier sync already settled is acknowledged, not rejected. Anything else stays a replay.
+    if serial is not None and isinstance(aid, int) and is_authentic(p) and p.merchant_id == merchant.id:
+        prior = _find_voucher(session, aid, serial)
+        if (prior and prior.merchant_id == merchant.id and prior.amount == p.amount
+                and prior.status in (VoucherStatus.SETTLED, VoucherStatus.SETTLED_PAYOUT_PENDING)):
+            item = ReportItem(serial=serial, amount=p.amount, status=prior.status.value, already=True,
+                              reasons=[ALREADY_SETTLED], capture_id=prior.capture_id,
+                              payout_batch_id=prior.payout_batch_id)
+            _audit_item(session, merchant, p, item)
+            return item
+
     # Only authentic vouchers (both signatures valid) may occupy an (allowance, serial) slot.
     storable = (
         is_authentic(p) and serial is not None and isinstance(aid, int)
@@ -244,6 +260,8 @@ def _summary(merchant: Merchant, report: SettlementReport) -> str:
         f"Settled {report.settled} of {total} vouchers for {merchant.name} "
         f"(${report.total_settled_amount:,.2f}); {report.rejected} rejected."
     )
+    if report.already_settled:
+        text += f" {report.already_settled} had already been settled earlier."
     if report.payout_pending:
         text += f" {report.payout_pending} captured but the merchant payout is still pending."
     if report.ai_review.risk in ("medium", "high"):
@@ -256,12 +274,15 @@ async def settle(session: Session, merchant_id: int, payments: list[OfflinePayme
     if merchant is None:
         raise LookupError(f"Merchant {merchant_id} not found")
     items = [await _settle_one(session, merchant, p) for p in payments]
-    captured = [i for i in items if i.status in ("SETTLED", "SETTLED_PAYOUT_PENDING")]
+    paid = ("SETTLED", "SETTLED_PAYOUT_PENDING")
+    already = [i for i in items if i.already]
+    captured = [i for i in items if i.status in paid and not i.already]
     ai = await _ai_review(session, merchant, payments, items) if payments else AIReview(risk="low")
     report = SettlementReport(
         settled=len(captured),
-        rejected=len(items) - len(captured),
-        payout_pending=sum(i.status == "SETTLED_PAYOUT_PENDING" for i in items),
+        already_settled=len(already),
+        rejected=len(items) - len(captured) - len(already),
+        payout_pending=sum(i.status == "SETTLED_PAYOUT_PENDING" for i in items if not i.already),
         total_settled_amount=round(sum(i.amount for i in captured), 2),
         items=items, ai_review=ai, summary="",
     )

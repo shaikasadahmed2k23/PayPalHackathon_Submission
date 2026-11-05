@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ErrorNote, Shell } from "@/components/Shell";
 import Scanner from "@/components/Scanner";
 import { api, money } from "@/lib/api";
+import { pillClass, statusLabel } from "@/lib/status";
 import { utcStamp } from "@/lib/canonical";
 import { useOnline } from "@/lib/hooks";
 import { enqueue, getCache, queued, setCache } from "@/lib/store";
@@ -16,7 +17,7 @@ type Mode = "idle" | "scanning" | "amount" | "result";
 interface Result { ok: boolean; title: string; reasons: string[] }
 interface Card { merchant: string; report?: SettlementReport; error?: string }
 
-const RISK_TONE = { low: "chip-ok", medium: "chip-warn", high: "chip-bad", unknown: "" } as const;
+const RISK_TONE = { low: "pill pill-ok", medium: "pill pill-warn", high: "pill pill-bad", unknown: "pill pill-neutral" } as const;
 
 export default function MerchantPage() {
   const online = useOnline();
@@ -237,6 +238,7 @@ export default function MerchantPage() {
             <>
               <div className="flex gap-6">
                 <div><p className="num text-3xl text-ok">{c.report.settled}</p><p className="label">settled</p></div>
+                {c.report.already_settled > 0 && <div><p className="num text-3xl text-ok">{c.report.already_settled}</p><p className="label">already settled</p></div>}
                 <div><p className="num text-3xl text-bad">{c.report.rejected}</p><p className="label">rejected</p></div>
                 <div className="ml-auto text-right"><p className="num text-3xl">{money(c.report.total_settled_amount)}</p><p className="label">paid out</p></div>
               </div>
@@ -245,15 +247,15 @@ export default function MerchantPage() {
                 <div key={k} className="rounded-2xl bg-panel2 p-3">
                   <div className="flex items-center justify-between">
                     <span>Code #{it.serial === null ? "?" : it.serial + 1} · {money(it.amount)}</span>
-                    <span className={`chip ${it.status === "REJECTED" ? "chip-bad" : "chip-ok"}`}>{it.status.replaceAll("_", " ").toLowerCase()}</span>
+                    <span className={pillClass(it.status)}>{it.already ? "already settled" : statusLabel(it.status)}</span>
                   </div>
-                  {it.reasons.map((r) => <p key={r} className="mt-1 text-sm text-bad">{r}</p>)}
+                  {it.reasons.map((r) => <p key={r} className={`mt-1 text-sm ${it.already ? "text-ok" : "text-bad"}`}>{r}</p>)}
                 </div>
               ))}
               <div className="rounded-2xl border border-line p-3">
                 <div className="flex items-center justify-between">
                   <span className="label">AI review (advisory)</span>
-                  <span className={`chip ${RISK_TONE[c.report.ai_review.risk]}`}>{c.report.ai_review.risk} risk</span>
+                  <span className={RISK_TONE[c.report.ai_review.risk]}>{c.report.ai_review.risk} risk</span>
                 </div>
                 {c.report.ai_review.findings.map((f) => <p key={f} className="mt-1 text-sm">• {f}</p>)}
               </div>

@@ -2,6 +2,7 @@
 // app/services/voucher_verify.py check for check, plus the local-queue duplicate check and a
 // "not expired right now" check that only a live scanner can make.
 
+import { decodeQr, QR_PREFIX } from "./compact";
 import { verifyObject } from "./keys";
 import type { Certificate, QrPayload, Merchant, Voucher } from "./types";
 
@@ -79,16 +80,16 @@ export async function verifyOffline(i: VerifyInput): Promise<string[]> {
   return reasons;
 }
 
-/** Parse what the scanner / paste box gave us. Throws a readable error on anything that isn't a LeashPay code. */
+/** Parse what the scanner / paste box gave us: the compact "LP1:" format (or, for dev, the full JSON). */
 export function parseQr(text: string): QrPayload {
-  let o: unknown;
+  const t = text.trim();
   try {
-    o = JSON.parse(text);
+    if (t.startsWith(QR_PREFIX)) return decodeQr(t);
+    const q = JSON.parse(t) as Partial<QrPayload> | null;
+    if (q && typeof q === "object" && q.certificate && q.voucher && typeof q.cert_signature === "string" && typeof q.device_signature === "string")
+      return q as QrPayload;
   } catch {
-    throw new Error("That isn't a LeashPay code");
+    /* fall through */
   }
-  const q = o as Partial<QrPayload> | null;
-  if (!q || typeof q !== "object" || !q.certificate || !q.voucher || typeof q.cert_signature !== "string" || typeof q.device_signature !== "string")
-    throw new Error("That isn't a LeashPay code");
-  return q as QrPayload;
+  throw new Error("That isn't a LeashPay code");
 }

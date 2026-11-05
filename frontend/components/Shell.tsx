@@ -13,9 +13,9 @@ export function OfflineBadge() {
   );
 }
 
-export function Shell({ title, children, back = true }: { title?: string; children: React.ReactNode; back?: boolean }) {
+export function Shell({ title, children, back = true, wide = false }: { title?: string; children: React.ReactNode; back?: boolean; wide?: boolean }) {
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col gap-5 px-5 pb-16 pt-5">
+    <main className={`mx-auto flex min-h-dvh w-full flex-col gap-5 px-5 pb-16 pt-5 ${wide ? "max-w-6xl" : "max-w-md"}`}>
       <header className="flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2 text-lg font-bold tracking-tight">
           <span className="inline-block h-3 w-3 rounded-full bg-accent" />

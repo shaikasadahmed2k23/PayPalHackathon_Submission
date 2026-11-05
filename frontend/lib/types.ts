@@ -43,10 +43,12 @@ export interface ReportItem {
   reasons: string[];
   capture_id: string | null;
   payout_batch_id: string | null;
+  already: boolean;
 }
 
 export interface SettlementReport {
   settled: number;
+  already_settled: number;
   rejected: number;
   payout_pending: number;
   total_settled_amount: number;
@@ -91,4 +93,33 @@ export interface ActivityItem {
   status: string;
   reasons: string[];
   channel: string;
+}
+
+export interface PurchaseLine {
+  product_id: number;
+  name: string;
+  qty: number;
+  unit_price: number;
+  line_total: number;
+  refunded_qty?: number;
+}
+
+export interface PurchaseOut {
+  id: number;
+  status: "CAPTURED" | "PENDING_APPROVAL" | "BLOCKED" | "REFUNDED" | "PARTIALLY_REFUNDED";
+  amount: number;
+  merchant: string;
+  items: PurchaseLine[];
+  capture_id: string | null;
+  approval_id: number | null;
+  reasons: string[];
+}
+
+export interface AgentReply {
+  conversation_id: string;
+  reply: string;
+  intent: string;
+  purchases: PurchaseOut[];
+  skipped: { item: string; reasons: string[] }[];
+  refunds: { purchase_id: number; amount: number; refund_id: string; status: string; items: string[] }[];
 }

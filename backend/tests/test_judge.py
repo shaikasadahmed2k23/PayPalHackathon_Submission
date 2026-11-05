@@ -156,6 +156,20 @@ def test_fail_beats_needs_approval():
 def test_checks_listed_in_spec_order():
     v = judge(make_policy(), spend(5, channel="offline"), ctx())
     assert [c.rule for c in v.checks] == [
-        "allowance_remaining", "blocked_merchant", "blocked_category", "allowed_category",
-        "per_tx_max", "daily_max", "offline_limit", "require_approval_above",
+        "blocked_merchant", "blocked_category", "allowed_category",
+        "per_tx_max", "offline_limit", "daily_max", "allowance_remaining", "require_approval_above",
     ]
+
+
+def test_reasons_are_ordered_rules_then_limits_then_allowance():
+    p = make_policy(allowed_categories=["food"], blocked_merchants=["Cafe"], offline=OfflinePolicy(enabled=True, per_tap_max=5.0))
+    v = judge(p, spend(100, category="electronics", merchant="Cafe", channel="offline"), ctx(spent_today=50, remaining=10))
+    kinds = [c.rule for c in v.checks if not c.passed]
+    assert kinds == ["blocked_merchant", "blocked_category", "per_tx_max", "offline_limit", "daily_max", "allowance_remaining"]
+    assert v.reasons[0] == "Cafe is blocked by your rules" and "left in your allowance" in v.reasons[-1]
+
+
+def test_offline_disabled_is_a_rule_violation_listed_before_limits():
+    p = make_policy(offline=OfflinePolicy(enabled=False, per_tap_max=5.0))
+    v = judge(p, spend(100, channel="offline"), ctx())
+    assert v.reasons[0] == "Offline payments are turned off in your rules" and "per-purchase" in v.reasons[1]

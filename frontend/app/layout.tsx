@@ -10,11 +10,11 @@ export const metadata: Metadata = {
   description: "Your money, on a leash.",
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, title: "LeashPay", statusBarStyle: "black-translucent" },
-  icons: { icon: "/icon.svg", apple: "/icon.svg" },
+  icons: { icon: [{ url: "/icon-192.png", sizes: "192x192", type: "image/png" }, { url: "/icon-512.png", sizes: "512x512", type: "image/png" }], apple: "/apple-touch-icon.png" },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0a0b0d",
+  themeColor: "#f5f7fa",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,

@@ -129,6 +129,34 @@ async def authorize_allowance(
     return {"certificate": cert, "signature": signature, "server_pubkey": crypto.server_pubkey_b64()}
 
 
+@router.get("")
+def list_allowances(session: Session = Depends(get_session)) -> list[dict[str, Any]]:
+    rows = session.exec(select(Allowance).order_by(Allowance.id.desc())).all()  # type: ignore[attr-defined]
+    return [{"allowance_id": a.id, "amount": a.amount, "status": a.status.value,
+             "captured_total": a.captured_total} for a in rows if a.paypal_order_id]
+
+
+@router.get("/{allowance_id}/summary")
+def get_summary(allowance_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:
+    """Dashboard KPIs, all from our own records."""
+    a = _get(session, allowance_id)
+    ledger = session.exec(select(LedgerEntry).where(LedgerEntry.allowance_id == allowance_id)).all()
+    purchases = session.exec(select(Purchase).where(Purchase.allowance_id == allowance_id)).all()
+    vouchers = session.exec(select(Voucher).where(Voucher.allowance_id == allowance_id)).all()
+    paid = (VoucherStatus.SETTLED, VoucherStatus.SETTLED_PAYOUT_PENDING)
+    return {
+        "allowance_id": a.id,
+        "status": a.status.value,
+        "held": a.amount,
+        "captured": a.captured_total,
+        "refunded": round(sum(e.refunded_amount for e in ledger), 2),
+        "returned_on_close": round(a.amount - a.captured_total, 2) if a.status == AllowanceStatus.CLOSED else 0.0,
+        "blocked_attempts": sum(p.status == PurchaseStatus.BLOCKED for p in purchases),
+        "vouchers_settled": sum(v.status in paid for v in vouchers),
+        "vouchers_rejected": sum(v.status == VoucherStatus.REJECTED for v in vouchers),
+    }
+
+
 @router.get("/{allowance_id}")
 def get_allowance(allowance_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:
     a = _get(session, allowance_id)

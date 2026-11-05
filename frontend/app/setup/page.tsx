@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { PayPalButton } from "@/components/PayPalButton";
 import { ErrorNote, Shell } from "@/components/Shell";
 import { api, money } from "@/lib/api";
 import type { ParsedPolicy } from "@/lib/types";
@@ -135,9 +136,8 @@ export default function Setup() {
               />
             </div>
             <p className="text-sm text-muted">PayPal holds this; nothing is taken until a purchase passes your rules.</p>
-            <button className="btn btn-primary w-full" disabled={!amountOk || busy !== null} onClick={create}>
-              {busy === "create" ? "Opening PayPal…" : `Create allowance${amountOk ? ` · ${money(Number(amount))}` : ""}`}
-            </button>
+            <PayPalButton disabled={!amountOk || busy !== null} busy={busy === "create"} onClick={create} />
+            {amountOk && <p className="text-center text-sm text-muted">Hold {money(Number(amount))} · you approve on PayPal's secure page</p>}
           </section>
         </>
       )}

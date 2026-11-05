@@ -275,3 +275,37 @@ def test_ai_review_failure_reason_is_audited_with_exception_type(env, monkeypatc
         a = s.exec(select(AuditLog).where(AuditLog.action == "anomaly_review")).one()
         assert a.verdict == "unknown"
         assert a.reasons == ["AI review unavailable: LLMError: gemini call failed: ServerError: 503 overloaded"]
+
+
+def test_resending_a_settled_voucher_is_acknowledged_not_rejected(env):
+    engine, pp, aid = env
+    chai = merchant_id(engine, "Chai Corner")
+    run_settle(engine, chai, [payment(aid, chai, 0, 3.0)])
+    again = run_settle(engine, chai, [payment(aid, chai, 0, 3.0), payment(aid, chai, 1, 2.0)])
+    first, second = again.items
+    assert first.status == "SETTLED" and first.already and first.reasons == [agent.ALREADY_SETTLED]
+    assert first.capture_id and first.payout_batch_id
+    assert second.status == "SETTLED" and not second.already
+    assert (again.settled, again.already_settled, again.rejected) == (1, 1, 0)
+    assert again.total_settled_amount == 2.0 and "already been settled" in again.summary
+    assert len(pp.captures) == 2 and len(pp.payouts) == 2  # nothing charged or paid twice
+
+
+def test_resend_with_different_amount_or_merchant_is_still_a_replay(env):
+    engine, pp, aid = env
+    chai, taco = merchant_id(engine, "Chai Corner"), merchant_id(engine, "Taco Truck")
+    run_settle(engine, chai, [payment(aid, chai, 0, 3.0)])
+    other_amount = run_settle(engine, chai, [payment(aid, chai, 0, 4.0)])
+    other_merchant = run_settle(engine, taco, [payment(aid, taco, 0, 3.0)])
+    for r in (other_amount, other_merchant):
+        assert r.items[0].status == "REJECTED" and r.items[0].reasons == [agent.REPLAY_REASON]
+        assert r.already_settled == 0 and r.rejected == 1
+    assert len(pp.captures) == 1
+
+
+def test_resend_of_a_rejected_voucher_is_not_treated_as_settled(env):
+    engine, pp, aid = env
+    chai = merchant_id(engine, "Chai Corner")
+    run_settle(engine, chai, [payment(aid, chai, 0, 9.0)])  # over the per-tap cap -> rejected
+    again = run_settle(engine, chai, [payment(aid, chai, 0, 9.0)])
+    assert again.items[0].status == "REJECTED" and again.already_settled == 0

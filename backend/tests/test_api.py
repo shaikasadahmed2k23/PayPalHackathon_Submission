@@ -176,3 +176,22 @@ def test_activity_feed_merges_sources_newest_first(client):
         ("approval", "PENDING"), ("refund", "REFUNDED"), ("voucher", "SETTLED"), ("purchase", "REFUNDED")]
     assert feed[3]["detail"] == "2x Chips" and feed[3]["title"] == "Taco Truck"
     assert c.get("/allowance/999/activity").status_code == 404
+
+
+def test_audit_ledger_summary_and_allowance_list(client):
+    c, pp = client
+    aid = _active_allowance(c)
+    c.post(f"/allowance/{aid}/test-spend", json={"amount": 3, "category": "food", "merchant_name": "Cafe"})
+    c.post(f"/allowance/{aid}/test-spend", json={"amount": 500, "category": "food", "merchant_name": "Bar"})
+    audit = c.get(f"/audit?allowance_id={aid}").json()
+    assert audit and audit[0]["id"] > audit[-1]["id"]  # newest first
+    assert {a["actor"] for a in audit} >= {"policy_judge", "system"}
+    assert all(a["verdict"] == "FAIL" for a in c.get(f"/audit?allowance_id={aid}&verdict=FAIL").json())
+    assert all(a["actor"] == "system" for a in c.get(f"/audit?allowance_id={aid}&actor=system").json())
+    assert c.get("/audit?allowance_id=999").json() == [] and len(c.get(f"/audit?limit=1").json()) == 1
+    assert [e["amount"] for e in c.get(f"/ledger?allowance_id={aid}").json()] == [3]
+    s = c.get(f"/allowance/{aid}/summary").json()
+    assert (s["held"], s["captured"], s["refunded"], s["returned_on_close"]) == (20, 3, 0, 0)
+    c.post(f"/allowance/{aid}/close?force=true")
+    assert c.get(f"/allowance/{aid}/summary").json()["returned_on_close"] == 17
+    assert c.get("/allowance").json()[0] == {"allowance_id": aid, "amount": 20.0, "status": "CLOSED", "captured_total": 3.0}

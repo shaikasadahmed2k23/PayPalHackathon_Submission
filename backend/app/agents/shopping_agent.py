@@ -278,7 +278,7 @@ async def _buy(
             session.add(purchase)
             session.commit()
             audit.log(session, "shopping_agent", "skip_group", verdict="FAIL", reasons=dry.reasons,
-                      payload={"purchase_id": purchase.id, "merchant": merchant.name, "amount": amount})
+                      payload={"allowance_id": allowance.id, "purchase_id": purchase.id, "merchant": merchant.name, "amount": amount})
             skipped.append(SkippedOut(item=f"{merchant.name} ({desc})", reasons=dry.reasons))
             purchases.append(purchase_out(session, purchase))
             continue
@@ -371,7 +371,7 @@ async def _refund(session: Session, allowance: Allowance, refs: list[RefundRef],
                     purchase.capture_id, amount, make_request_id(allowance, "refund", key))
             except PayPalError as e:
                 audit.log(session, "shopping_agent", "refund_failed", reasons=[str(e)],
-                          payload={"purchase_id": purchase.id, "amount": amount})
+                          payload={"allowance_id": allowance.id, "purchase_id": purchase.id, "amount": amount})
                 notes.append(f"PayPal couldn't process the refund of {_m(amount)}: {e}")
                 continue
 
@@ -389,7 +389,7 @@ async def _refund(session: Session, allowance: Allowance, refs: list[RefundRef],
             session.add(purchase)
             session.commit()
             audit.log(session, "shopping_agent", "refund", verdict=purchase.status.value, paypal_ref=refund_id,
-                      payload={"purchase_id": purchase.id, "amount": amount, "status": status,
+                      payload={"allowance_id": allowance.id, "purchase_id": purchase.id, "amount": amount, "status": status,
                                "items": [l["name"] for l in todo]})
             refunds.append(RefundOut(purchase_id=purchase.id, amount=amount, refund_id=refund_id,  # type: ignore[arg-type]
                                      status=status, items=[l["name"] for l in todo]))

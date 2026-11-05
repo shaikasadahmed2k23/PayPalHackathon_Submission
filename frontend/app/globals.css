@@ -1,18 +1,23 @@
 @import "tailwindcss";
 
-/* LeashPay: near-black ink, one acid-lime accent. Green/red appear only as verification results. */
+/* LeashPay: light, trustworthy fintech palette. Navy text, one bright-blue accent, soft blue-grey cards.
+   Semantic colours only for outcomes: green = pass/captured/settled, amber = needs approval,
+   red = blocked/rejected, blue-grey = refunded. */
 :root {
-  --ink: #0a0b0d;
-  --panel: #14161a;
-  --panel-2: #1b1e23;
-  --line: #262a31;
-  --text: #eceef1;
-  --muted: #8b919b;
-  --accent: #c8f53c;
-  --accent-ink: #11140a;
-  --ok: #35d07f;
-  --bad: #ff5d5d;
-  --warn: #f5c542;
+  --ink: #f5f7fa; /* page background */
+  --panel: #eaf0f7; /* cards */
+  --panel-2: #dde6f1; /* nested / hover */
+  --field: #ffffff;
+  --line: #cfdae8;
+  --text: #0b2a5b; /* deep navy */
+  --muted: #5a6b86;
+  --accent: #0070e0; /* primary blue */
+  --accent-hover: #005ec2;
+  --accent-ink: #ffffff;
+  --ok: #12804a;
+  --bad: #cf2e2e;
+  --warn: #b25e00;
+  --info: #4b6382; /* refunded: blue-grey */
 }
 
 @theme inline {
@@ -26,18 +31,19 @@
   --color-ok: var(--ok);
   --color-bad: var(--bad);
   --color-warn: var(--warn);
+  --color-info: var(--info);
   --font-sans: var(--font-geist-sans), system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
 html {
   background: var(--ink);
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
   background:
-    radial-gradient(900px 420px at 85% -10%, rgba(200, 245, 60, 0.07), transparent 60%),
+    radial-gradient(900px 420px at 85% -10%, rgba(0, 112, 224, 0.08), transparent 60%),
     var(--ink);
   color: var(--text);
   font-family: var(--font-sans);
@@ -51,81 +57,136 @@ body {
   font-weight: 700;
 }
 
-.card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  padding: 18px;
+/* Component classes live in a layer so Tailwind utilities (text-ok, bg-ok/15 ...) can override them. */
+@layer components {
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 18px;
+  }
+
+  .label {
+    color: var(--muted);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 52px;
+    padding: 0 22px;
+    border-radius: 16px;
+    font-weight: 650;
+    font-size: 16px;
+    border: 1px solid var(--line);
+    background: #fff;
+    color: var(--text);
+    transition: transform 0.08s ease, opacity 0.15s ease, background 0.15s ease;
+    cursor: pointer;
+  }
+  .btn:hover:not(:disabled) {
+    background: var(--panel-2);
+  }
+  .btn:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+  .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: var(--accent-ink);
+    border-color: transparent;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
+  .btn-danger {
+    color: var(--bad);
+  }
+  .btn-sm {
+    min-height: 40px;
+    padding: 0 14px;
+    font-size: 14px;
+    border-radius: 12px;
+  }
+
+  .field {
+    width: 100%;
+    background: var(--field);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 14px 16px;
+    color: var(--text);
+    font-size: 16px;
+    outline: none;
+  }
+  .field:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(0, 112, 224, 0.15);
+  }
+
+  .chip {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    background: var(--panel-2);
+    color: var(--muted);
+  }
+
+  /* Status pills (see lib/status.ts) */
+  .pill {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .pill-ok { background: rgba(18, 128, 74, 0.14); color: var(--ok); }
+  .pill-warn { background: rgba(178, 94, 0, 0.14); color: var(--warn); }
+  .pill-bad { background: rgba(207, 46, 46, 0.13); color: var(--bad); }
+  .pill-info { background: rgba(75, 99, 130, 0.16); color: var(--info); }
+  .pill-neutral { background: var(--panel-2); color: var(--muted); }
+
+  /* Official-style PayPal button (brand guideline: gold #FFC439, blue/navy wordmark text, pill shape). */
+  .pp-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 52px;
+    border-radius: 999px;
+    border: 0;
+    background: #ffc439;
+    color: #003087;
+    font-weight: 700;
+    font-size: 17px;
+    font-style: italic;
+    cursor: pointer;
+  }
+  .pp-btn:hover:not(:disabled) { background: #f2ba36; }
+  .pp-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 
-.label {
-  color: var(--muted);
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 52px;
-  padding: 0 22px;
-  border-radius: 16px;
-  font-weight: 650;
-  font-size: 16px;
-  border: 1px solid var(--line);
-  background: var(--panel-2);
-  color: var(--text);
-  transition: transform 0.08s ease, opacity 0.15s ease;
-  cursor: pointer;
-}
-.btn:active:not(:disabled) {
-  transform: scale(0.98);
-}
-.btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.btn-primary {
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-color: transparent;
-}
-.btn-danger {
-  color: var(--bad);
-}
-.btn-sm {
-  min-height: 40px;
-  padding: 0 14px;
-  font-size: 14px;
-  border-radius: 12px;
-}
-
-.field {
-  width: 100%;
-  background: var(--ink);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 14px 16px;
-  color: var(--text);
-  font-size: 16px;
-  outline: none;
-}
-.field:focus {
-  border-color: var(--accent);
-}
-
-.chip {
-  display: inline-block;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  background: var(--panel-2);
-  color: var(--muted);
-}
+/* Tiny legacy helpers still used in a few pages */
 .chip-ok { color: var(--ok); }
 .chip-bad { color: var(--bad); }
 .chip-warn { color: var(--warn); }
+
+/* AG Grid: wrapped reason cells use a normal line height instead of the row height */
+.reason-cell {
+  line-height: 1.35 !important;
+  padding-top: 7px !important;
+  padding-bottom: 7px !important;
+  white-space: normal !important;
+}

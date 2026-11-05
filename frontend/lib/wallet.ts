@@ -1,4 +1,5 @@
 import { utcStamp } from "./canonical";
+import { encodeQr } from "./compact";
 import { signWithDeviceKey } from "./keys";
 import { getWallet, putWallet, type WalletRecord } from "./store";
 import type { QrPayload } from "./types";
@@ -38,3 +39,9 @@ export async function ensureCurrentCode(allowanceId: number): Promise<WalletReco
   if (!w) throw new Error("No wallet on this device");
   return w.current ? w : issueNextCode(allowanceId);
 }
+
+/** The exact string encoded in the QR (and copied by the dev "Copy code" button). */
+export const qrText = (w: WalletRecord): string | null => {
+  const p = qrPayload(w);
+  return p ? encodeQr(p) : null;
+};

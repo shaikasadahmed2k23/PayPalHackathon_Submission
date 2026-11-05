@@ -13,6 +13,8 @@
   "dependencies": {
     "@noble/ed25519": "^3.2.0",
     "@serwist/next": "^9.5.13",
+    "ag-grid-community": "^36.3.0",
+    "ag-grid-react": "^36.3.0",
     "html5-qrcode": "^2.3.8",
     "idb": "^8.0.4",
     "next": "16.4.5",
