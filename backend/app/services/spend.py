@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 
 from app import audit
 from app.models import (
-    Allowance, AllowanceStatus, Approval, LedgerEntry, Policy as PolicyRow, Voucher,
+    Allowance, AllowanceStatus, Approval, AuditLog, LedgerEntry, Policy as PolicyRow, Voucher,
 )
 from app.paypal import PayPalError, get_paypal_client
 from app.policy.judge import judge
@@ -43,13 +43,29 @@ def _as_utc(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)  # SQLite drops tzinfo
 
 
+def _midnight_utc() -> datetime:
+    return datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 def compute_spent_today(session: Session, allowance_id: int) -> float:
-    """Net spend (captures minus refunds) since 00:00 UTC today."""
-    midnight = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    """GROSS money captured since 00:00 UTC today. Refunds are NOT netted off: captured money can't
+    go back onto a PayPal authorization (refunds land in the buyer's PayPal balance), so the daily
+    limit and the hold both keep counting it."""
+    midnight = _midnight_utc()
     entries = session.exec(select(LedgerEntry).where(LedgerEntry.allowance_id == allowance_id)).all()
-    return round(
-        sum(e.amount - e.refunded_amount for e in entries if _as_utc(e.created_at) >= midnight), 2
-    )
+    return round(sum(e.amount for e in entries if _as_utc(e.created_at) >= midnight), 2)
+
+
+def compute_refunds(session: Session, allowance_id: int) -> tuple[float, float]:
+    """(refunded_total, refunded_today): money sent back to the buyer's PayPal balance."""
+    entries = session.exec(select(LedgerEntry).where(LedgerEntry.allowance_id == allowance_id)).all()
+    total = round(sum(e.refunded_amount for e in entries), 2)
+    midnight = _midnight_utc()
+    today = 0.0
+    for log in session.exec(select(AuditLog).where(AuditLog.action == "refund")).all():
+        if log.payload_json.get("allowance_id") == allowance_id and _as_utc(log.ts) >= midnight:
+            today += float(log.payload_json.get("amount", 0))
+    return total, round(today, 2)
 
 
 def make_request_id(allowance: Allowance, kind: str, key: object) -> str:
@@ -145,8 +161,9 @@ async def spend(
             result.approval_id = approval.id
             payload["approval_id"] = approval.id
 
+        actor_of = "external_agent" if (audit_extra or {}).get("agent") else None
         audit.log(
-            session, "policy_judge", "judge_spend",
+            session, actor_of or "policy_judge", "judge_spend",
             verdict=verdict.decision, reasons=verdict.reasons, payload=payload,
         )
 
@@ -160,7 +177,7 @@ async def spend(
                     raise PayPalError(200, f"capture came back with status {status}")
             except PayPalError as e:
                 audit.log(
-                    session, "system", "capture_failed", reasons=[str(e)],
+                    session, actor_of or "system", "capture_failed", reasons=[str(e)],
                     payload={**payload, "request_id": request_id},
                 )
                 raise
@@ -181,7 +198,7 @@ async def spend(
             session.commit()
             result.capture_id = capture_id
             audit.log(
-                session, "system", "capture",
+                session, actor_of or "system", "capture",
                 verdict="PASS", paypal_ref=capture_id,
                 payload={**payload, "capture_id": capture_id, "request_id": request_id, "status": status},
             )

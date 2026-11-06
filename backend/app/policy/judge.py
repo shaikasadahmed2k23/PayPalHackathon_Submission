@@ -1,6 +1,7 @@
 """Policy Judge: a pure, deterministic rule engine. No LLM, no I/O."""
 
 from decimal import Decimal
+from typing import Optional
 
 from app.policy.schema import Check, Policy, SpendContext, SpendRequest, Verdict
 
@@ -15,9 +16,12 @@ def _m(x: Decimal) -> str:
 
 
 def judge(
-    policy: Policy, spend: SpendRequest, context: SpendContext, skip_approval: bool = False
+    policy: Policy, spend: SpendRequest, context: SpendContext, skip_approval: bool = False,
+    agent_cap: Optional[float] = None, agent_name: str = "the agent",
 ) -> Verdict:
-    """skip_approval: the user already approved this spend; every FAIL rule still applies."""
+    """skip_approval: the user already approved this spend; every FAIL rule still applies.
+    agent_cap: an extra per-purchase cap the user set for one external agent (a limit, so it is
+    reported after rule violations and before the policy's own limits)."""
     amount = _d(spend.amount)
     spent_today = _d(context.spent_today)
     remaining = _d(context.allowance_remaining)
@@ -57,6 +61,14 @@ def judge(
         )
     if spend.channel == "offline" and not policy.offline.enabled:
         add("offline_limit", True, "Offline payments are turned off in your rules", "")
+    if agent_cap is not None:
+        cap = _d(agent_cap)
+        add(
+            "agent_cap",
+            amount > cap,
+            f"Over the {_m(cap)} cap you set for {agent_name}",
+            f"{_m(amount)} is within the {_m(cap)} cap you set for {agent_name}",
+        )
     per_tx = _d(policy.per_tx_max)
     add(
         "per_tx_max",

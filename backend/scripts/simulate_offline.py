@@ -46,6 +46,7 @@ def main() -> None:
     pid = call(api, "POST", "/policy", json={"raw_text": "simulate: food only offline", "policy": policy})["id"]
     created = call(api, "POST", "/allowance", json={"policy_id": pid, "amount": 20})
     aid = created["allowance_id"]
+    api.headers["X-Owner-Token"] = created["owner_token"]  # owner-only routes: authorize, close, approvals...
     print("\nOpen this, log in with the SANDBOX PERSONAL account, approve:\n", created["approve_url"])
     input("\nPress Enter after approving...")
 

@@ -19,7 +19,8 @@ from app.models import (
 )
 from app.paypal import get_paypal_client
 from app.policy.schema import Cat, Policy, SpendRequest
-from app.services.spend import SpendResult, compute_spent_today, make_request_id, spend
+from app.services.owner import OwnerHeader, check_owner, new_token
+from app.services.spend import SpendResult, compute_refunds, compute_spent_today, make_request_id, spend
 
 router = APIRouter(prefix="/allowance", tags=["allowance"])
 
@@ -65,7 +66,8 @@ async def create_allowance(
 ) -> dict[str, Any]:
     if not session.get(PolicyRow, body.policy_id):
         raise HTTPException(404, f"Policy {body.policy_id} not found")
-    allowance = Allowance(policy_id=body.policy_id, amount=body.amount)
+    owner_token, owner_hash = new_token()
+    allowance = Allowance(policy_id=body.policy_id, amount=body.amount, owner_token_hash=owner_hash)
     session.add(allowance)
     session.commit()
     session.refresh(allowance)
@@ -85,14 +87,17 @@ async def create_allowance(
     session.commit()
     audit.log(session, "user", "create_allowance", paypal_ref=order_id,
               payload={"allowance_id": allowance.id, "amount": body.amount})
-    return {"allowance_id": allowance.id, "approve_url": approve_url}
+    # owner_token is returned this once; only its hash is stored (and it never goes to the audit log)
+    return {"allowance_id": allowance.id, "approve_url": approve_url, "owner_token": owner_token}
 
 
 @router.post("/{allowance_id}/authorize")
 async def authorize_allowance(
-    allowance_id: int, body: AuthorizeIn, session: Session = Depends(get_session)
+    allowance_id: int, body: AuthorizeIn, session: Session = Depends(get_session),
+    x_owner_token: OwnerHeader = None,
 ) -> dict[str, Any]:
     allowance = _get(session, allowance_id)
+    check_owner(session, allowance_id, x_owner_token)
     if allowance.status != AllowanceStatus.CREATED or not allowance.paypal_order_id:
         raise HTTPException(409, f"Allowance is {allowance.status.value}, cannot authorize")
     try:
@@ -161,6 +166,7 @@ def get_summary(allowance_id: int, session: Session = Depends(get_session)) -> d
 def get_allowance(allowance_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:
     a = _get(session, allowance_id)
     policy_row = session.get(PolicyRow, a.policy_id)
+    refunded_total, refunded_today = compute_refunds(session, allowance_id)
     envelope: Optional[dict[str, Any]] = a.certificate
     return {
         "allowance_id": a.id,
@@ -168,7 +174,9 @@ def get_allowance(allowance_id: int, session: Session = Depends(get_session)) ->
         "amount": a.amount,
         "captured_total": a.captured_total,
         "remaining": round(a.amount - a.captured_total, 2),
-        "spent_today": compute_spent_today(session, allowance_id),
+        "spent_today": compute_spent_today(session, allowance_id),  # gross captured today (refunds not netted)
+        "refunded_total": refunded_total,  # went back to the buyer's PayPal balance, NOT onto the hold
+        "refunded_today": refunded_today,
         "expires_at": a.expires_at,
         "authorization_id": a.authorization_id,
         "policy": policy_row.policy_json if policy_row else None,
@@ -179,10 +187,12 @@ def get_allowance(allowance_id: int, session: Session = Depends(get_session)) ->
 
 @router.post("/{allowance_id}/test-spend")
 async def test_spend(
-    allowance_id: int, body: TestSpendIn, session: Session = Depends(get_session)
+    allowance_id: int, body: TestSpendIn, session: Session = Depends(get_session),
+    x_owner_token: OwnerHeader = None,
 ) -> SpendResult:
     """Dev/demo endpoint: runs the real spend engine without a shopping agent or voucher."""
     allowance = _get(session, allowance_id)
+    check_owner(session, allowance_id, x_owner_token)
     if body.channel not in ("online", "offline"):
         raise HTTPException(422, "channel must be 'online' or 'offline'")
     sid = uuid.uuid4().hex
@@ -219,10 +229,12 @@ def get_offline_status(allowance_id: int, session: Session = Depends(get_session
 
 @router.post("/{allowance_id}/issued")
 def report_issued(
-    allowance_id: int, body: IssuedIn, session: Session = Depends(get_session)
+    allowance_id: int, body: IssuedIn, session: Session = Depends(get_session),
+    x_owner_token: OwnerHeader = None,
 ) -> dict[str, Any]:
     """The wallet reports the highest voucher serial it has shown. Only ever moves up."""
     a = _get(session, allowance_id)
+    check_owner(session, allowance_id, x_owner_token)
     mark = session.get(IssuedMark, allowance_id)
     if mark is None:
         mark = IssuedMark(allowance_id=allowance_id, highest_serial=body.highest_serial)
@@ -290,9 +302,11 @@ def get_activity(
 
 @router.post("/{allowance_id}/close")
 async def close_allowance(
-    allowance_id: int, force: bool = False, session: Session = Depends(get_session)
+    allowance_id: int, force: bool = False, session: Session = Depends(get_session),
+    x_owner_token: OwnerHeader = None,
 ) -> dict[str, Any]:
     a = _get(session, allowance_id)
+    check_owner(session, allowance_id, x_owner_token)
     if a.status != AllowanceStatus.ACTIVE or not a.authorization_id:
         raise HTTPException(409, f"Allowance is {a.status.value}, cannot close")
     status = offline_status(session, a)

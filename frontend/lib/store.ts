@@ -48,6 +48,10 @@ export async function currentWallet(): Promise<WalletRecord | undefined> {
 }
 export const setCurrentAllowance = (id: number) => setCache("current_allowance_id", id);
 
+// ---- owner token (lpo_..., returned once by POST /allowance; proves this device owns the allowance)
+export const setOwnerToken = (id: number, token: string) => setCache(`owner_token_${id}`, token);
+export const getOwnerToken = (id: number) => getCache<string>(`owner_token_${id}`);
+
 // ---- merchant queue
 export const enqueue = async (p: OfflinePayment) => void (await (await db()).add("queue", p));
 export const queued = async (): Promise<QueuedPayment[]> => (await db()).getAll("queue");

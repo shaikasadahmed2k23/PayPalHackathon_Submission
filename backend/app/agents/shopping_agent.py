@@ -19,7 +19,7 @@ from app.llm import LLMError, generate_json
 from app.models import Allowance, Merchant, Product, Purchase, PurchaseStatus
 from app.services.purchase import (  # noqa: F401  (re-exported: routers and tests import them from here)
     PurchaseOut, RefundOut, SkippedOut, buy_items, line_names as _names, list_purchases, money as _m,
-    purchase_out, refund_purchase, remaining_qty as _remaining,
+    balance_line, purchase_out, refund_purchase, refund_text, remaining_qty as _remaining,
 )
 from app.services.spend import get_spend_context
 
@@ -231,10 +231,11 @@ async def _refund(session: Session, allowance: Allowance, refs: list[RefundRef],
         else:
             notes.append(res.note)
 
-    parts = [f"Refunded {_m(r.amount)} for {', '.join(r.items)} (PayPal refund {r.status.lower()})." for r in refunds]
+    parts = [f"{', '.join(r.items)}: refunded {_m(r.amount)}." for r in refunds]
     parts += notes
     if refunds:
-        parts.append(f"Total refunded: {_m(sum(r.amount for r in refunds))}.")
+        session.refresh(allowance)
+        parts.append(refund_text(sum(r.amount for r in refunds), get_spend_context(session, allowance).allowance_remaining))
     return AgentReply(conversation_id="", reply=" ".join(parts), intent="refund", refunds=refunds,
                       purchases=[purchase_out(session, session.get(Purchase, pid)) for pid in wanted])  # type: ignore[arg-type]
 
@@ -247,8 +248,7 @@ def _status(session: Session, allowance: Allowance) -> AgentReply:
     rows = list_purchases(session, allowance.id)  # type: ignore[arg-type]
     pending = [r for r in rows if r.status == "PENDING_APPROVAL"]
     last = [r for r in rows if r.status != "BLOCKED"][-5:]
-    reply = (f"You've spent {_m(ctx.spent_today)} today and have {_m(ctx.allowance_remaining)} left "
-             f"of your {_m(allowance.amount)} allowance.")
+    reply = balance_line(session, allowance)
     if last:
         reply += " Recent purchases: " + "; ".join(
             f"{r.merchant} {_m(r.amount)} ({r.status.lower().replace('_', ' ')})" for r in last) + "."

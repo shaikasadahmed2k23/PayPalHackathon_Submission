@@ -69,7 +69,9 @@ export interface AllowanceInfo {
   amount: number;
   captured_total: number;
   remaining: number;
-  spent_today: number;
+  spent_today: number; // gross captured today (refunds are not netted off)
+  refunded_total: number; // went back to the buyer's PayPal balance, not onto the hold
+  refunded_today: number;
   expires_at: string | null;
 }
 

@@ -7,6 +7,8 @@ from sqlmodel import Session, select
 from app import audit
 from app.db import get_session
 from app.models import Allowance, Approval, ApprovalStatus, Purchase, PurchaseStatus
+from app.models import AuditLog
+from app.services.owner import OwnerHeader, check_owner
 from app.services.spend import SpendResult, make_request_id, spend
 
 router = APIRouter(prefix="/approvals", tags=["approvals"])
@@ -39,6 +41,16 @@ def _sync_purchase(
     session.add(purchase)
 
 
+def _agent_extra(session: Session, ap: Approval) -> dict[str, str]:
+    """If an external agent asked for this purchase, its judge_spend audit row names it; carry that onto
+    the approved capture's audit rows so the dashboard still shows who shopped."""
+    rows = session.exec(select(AuditLog).where(AuditLog.action == "judge_spend").order_by(AuditLog.id.desc())).all()  # type: ignore[attr-defined]
+    for r in rows:
+        if r.payload_json.get("approval_id") == ap.id and r.payload_json.get("agent"):
+            return {"agent": r.payload_json["agent"], "key_prefix": r.payload_json.get("key_prefix", "")}
+    return {}
+
+
 @router.get("")
 def list_approvals(
     status: Optional[ApprovalStatus] = None, session: Session = Depends(get_session)
@@ -50,15 +62,17 @@ def list_approvals(
 
 
 @router.post("/{approval_id}/approve")
-async def approve(approval_id: int, session: Session = Depends(get_session)) -> SpendResult:
+async def approve(approval_id: int, session: Session = Depends(get_session),
+                  x_owner_token: OwnerHeader = None) -> SpendResult:
     ap = _get_pending(session, approval_id)
+    check_owner(session, ap.allowance_id, x_owner_token)
     allowance = session.get(Allowance, ap.allowance_id)
     assert allowance is not None
     # Same spend path as everything else; only the approval threshold is waived.
     result = await spend(
         session, ap.allowance_id, ap.amount, ap.category, ap.merchant_name, ap.channel,
         source=ap.source, source_id=ap.source_id, request_id=make_request_id(allowance, "approval", ap.id),
-        skip_approval=True,
+        skip_approval=True, audit_extra=_agent_extra(session, ap),
     )
     if result.verdict.decision != "PASS":
         raise HTTPException(
@@ -75,8 +89,9 @@ async def approve(approval_id: int, session: Session = Depends(get_session)) -> 
 
 
 @router.post("/{approval_id}/deny")
-def deny(approval_id: int, session: Session = Depends(get_session)) -> Approval:
+def deny(approval_id: int, session: Session = Depends(get_session), x_owner_token: OwnerHeader = None) -> Approval:
     ap = _get_pending(session, approval_id)
+    check_owner(session, ap.allowance_id, x_owner_token)
     ap.status = ApprovalStatus.DENIED
     _sync_purchase(session, ap, PurchaseStatus.BLOCKED, None, ["You denied this purchase"])
     ap.decided_at = datetime.now(timezone.utc)

@@ -18,7 +18,7 @@ from app.models import (
 from app.paypal import PayPalError, get_paypal_client
 from app.policy.judge import judge
 from app.policy.schema import Policy, SpendRequest
-from app.services.spend import allowance_lock, get_spend_context, make_request_id, spend
+from app.services.spend import allowance_lock, compute_refunds, get_spend_context, make_request_id, spend
 
 logger = logging.getLogger("leashpay.purchase")
 
@@ -68,6 +68,24 @@ class RefundResult(BaseModel):
 
 def money(x: float) -> str:
     return f"${x:,.2f}"
+
+
+def balance_line(session: Session, allowance: Allowance) -> str:
+    """The one wording of the balance, used by the wallet text, the chat agent and the MCP tools.
+    Spent money never returns to the PayPal hold: refunds go to the buyer's PayPal balance."""
+    session.refresh(allowance)
+    ctx = get_spend_context(session, allowance)
+    refunded, _ = compute_refunds(session, allowance.id)  # type: ignore[arg-type]
+    text = (f"Left on hold: {money(ctx.allowance_remaining)} of {money(allowance.amount)}. "
+            f"Spent: {money(allowance.captured_total)} ({money(ctx.spent_today)} today).")
+    if refunded > 0:
+        text += f" Refunded: {money(refunded)} (returned to your PayPal balance - refunds don't refill the hold)."
+    return text
+
+
+def refund_text(amount: float, remaining: float) -> str:
+    return (f"Refunded {money(amount)} to your PayPal balance. Your hold stays at {money(remaining)} "
+            "because spent money can't return to a PayPal hold.")
 
 
 def line_names(lines: list[dict[str, Any]]) -> str:
@@ -157,13 +175,12 @@ async def buy_items(
         session.commit()
         session.refresh(purchase)
 
-        # Dry run (plus the per-key cap, if any): skip a group that would FAIL instead of attempting it.
+        # Dry run (the judge also applies this agent's own cap): skip a group that would FAIL.
         dry = judge(policy, SpendRequest(amount=amount, category=merchant.category,  # type: ignore[arg-type]
-                                         merchant_name=merchant.name, channel="online"), ctx)
+                                         merchant_name=merchant.name, channel="online"), ctx,
+                    agent_cap=agent_key.per_purchase_cap if agent_key else None,
+                    agent_name=agent_key.name if agent_key else "the agent")
         reasons = dry.reasons if dry.decision == "FAIL" else []
-        capped = agent_key is not None and agent_key.per_purchase_cap is not None and amount > agent_key.per_purchase_cap
-        if capped:
-            reasons = [f"Over the {money(agent_key.per_purchase_cap)} cap you set for {agent_key.name}"] + reasons  # type: ignore[union-attr,arg-type]
         if reasons:
             purchase.judge_reasons = reasons
             session.add(purchase)

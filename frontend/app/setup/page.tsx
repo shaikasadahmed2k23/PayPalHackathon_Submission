@@ -4,6 +4,7 @@ import { useState } from "react";
 import { PayPalButton } from "@/components/PayPalButton";
 import { ErrorNote, Shell } from "@/components/Shell";
 import { api, money } from "@/lib/api";
+import { setOwnerToken } from "@/lib/store";
 import type { ParsedPolicy } from "@/lib/types";
 
 const EXAMPLES = [
@@ -47,9 +48,10 @@ export default function Setup() {
     setError("");
     try {
       const { id } = await api<{ id: number }>("/policy", { body: { raw_text: text, policy: parsed.policy } });
-      const res = await api<{ allowance_id: number; approve_url: string }>("/allowance", {
+      const res = await api<{ allowance_id: number; approve_url: string; owner_token: string }>("/allowance", {
         body: { policy_id: id, amount: Number(amount) },
       });
+      await setOwnerToken(res.allowance_id, res.owner_token); // shown once by the server; kept on this device
       window.location.href = res.approve_url; // PayPal, then back to /setup/return
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");

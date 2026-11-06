@@ -14,6 +14,16 @@ from app.services import spend as spend_mod
 from tests.fakes import FakePayPal, make_engine
 
 
+class OwnerClient(TestClient):
+    """Behaves like the wallet: keeps the owner token that POST /allowance returned and sends it from then on."""
+
+    def request(self, method, url, **kw):  # type: ignore[no-untyped-def]
+        r = super().request(method, url, **kw)
+        if method == "POST" and url == "/allowance" and r.status_code == 200:
+            self.headers["X-Owner-Token"] = r.json()["owner_token"]
+        return r
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     engine, pp = make_engine(tmp_path), FakePayPal()
@@ -27,7 +37,7 @@ def client(tmp_path, monkeypatch):
 
     app.dependency_overrides[get_session] = sess
     pp.engine = engine  # lets tests seed rows directly
-    yield TestClient(app), pp
+    yield OwnerClient(app), pp
     app.dependency_overrides.clear()
 
 
@@ -195,3 +205,77 @@ def test_audit_ledger_summary_and_allowance_list(client):
     c.post(f"/allowance/{aid}/close?force=true")
     assert c.get(f"/allowance/{aid}/summary").json()["returned_on_close"] == 17
     assert c.get("/allowance").json()[0] == {"allowance_id": aid, "amount": 20.0, "status": "CLOSED", "captured_total": 3.0}
+
+
+# ---- owner token ----------------------------------------------------------------------------
+
+def _owner_setup(c):
+    pid = c.post("/policy", json={"raw_text": "t", "policy": {"require_approval_above": 1}}).json()["id"]
+    made = c.post("/allowance", json={"policy_id": pid, "amount": 20}).json()
+    return made["allowance_id"], made["owner_token"]
+
+
+def test_owner_token_returned_once_stored_hashed(client):
+    c, pp = client
+    aid, token = _owner_setup(c)
+    assert token.startswith("lpo_") and len(token) == 36
+    assert "owner_token" not in c.get(f"/allowance/{aid}").json()
+    with Session(pp.engine) as s:
+        from app.models import Allowance, AuditLog
+        from sqlmodel import select
+        a = s.get(Allowance, aid)
+        assert a.owner_token_hash and a.owner_token_hash != token and len(a.owner_token_hash) == 64
+        assert token not in str([r.payload_json for r in s.exec(select(AuditLog)).all()])
+
+
+def test_owner_only_routes_need_the_token(client):
+    c, pp = client
+    aid, token = _owner_setup(c)
+    pub = base64.b64encode(bytes(32)).decode()
+    del c.headers["X-Owner-Token"]  # now act like someone without the token
+    wrong = {"X-Owner-Token": "lpo_" + "x" * 32}
+    for hdr in ({}, wrong):
+        assert c.post(f"/allowance/{aid}/authorize", json={"device_pubkey_b64": pub}, headers=hdr).status_code == 401
+    ok = {"X-Owner-Token": token}
+    assert c.post(f"/allowance/{aid}/authorize", json={"device_pubkey_b64": pub}, headers=ok).status_code == 200
+
+    ap = c.post(f"/allowance/{aid}/test-spend", json=body(5, "food"), headers=ok).json()
+    assert c.post(f"/allowance/{aid}/test-spend", json=body(5, "food")).status_code == 401
+    for hdr in ({}, wrong):
+        assert c.post(f"/approvals/{ap['approval_id']}/approve", headers=hdr).status_code == 401
+        assert c.post(f"/approvals/{ap['approval_id']}/deny", headers=hdr).status_code == 401
+        assert c.post(f"/allowance/{aid}/issued", json={"highest_serial": 0}, headers=hdr).status_code == 401
+        assert c.post(f"/allowance/{aid}/close", headers=hdr).status_code == 401
+        assert c.post(f"/allowance/{aid}/agent-keys", json={"name": "x"}, headers=hdr).status_code == 401
+        assert c.get(f"/allowance/{aid}/agent-keys", headers=hdr).status_code == 401
+    key = c.post(f"/allowance/{aid}/agent-keys", json={"name": "Bot"}, headers=ok).json()
+    for hdr in ({}, wrong):
+        assert c.delete(f"/agent-keys/{key['id']}", headers=hdr).status_code == 401
+    assert c.get(f"/allowance/{aid}/agent-keys", headers=ok).status_code == 200
+    assert c.delete(f"/agent-keys/{key['id']}", headers=ok).json()["revoked_at"]
+    assert c.post(f"/approvals/{ap['approval_id']}/approve", headers=ok).status_code == 200
+    assert c.post(f"/allowance/{aid}/close?force=true", headers=ok).json()["status"] == "CLOSED"
+
+
+def test_reads_and_public_routes_stay_open_without_the_token(client):
+    c, pp = client
+    aid, _ = _owner_setup(c)
+    del c.headers["X-Owner-Token"]
+    for path in (f"/allowance/{aid}", f"/allowance/{aid}/summary", f"/allowance/{aid}/activity",
+                 "/allowance", "/audit", "/ledger", "/approvals", "/merchants", "/health"):
+        assert c.get(path).status_code == 200, path
+    assert c.post("/policy/parse", json={"text": "no alcohol"}).status_code != 401
+
+
+def test_agent_key_can_never_use_an_owner_route_even_with_the_owner_token(client):
+    c, pp = client
+    aid, token = _owner_setup(c)
+    key = c.post(f"/allowance/{aid}/agent-keys", json={"name": "Bot"}).json()["key"]
+    assert c.post(f"/allowance/{aid}/close", headers={"X-Agent-Key": key, "X-Owner-Token": token}).status_code == 403
+
+
+def test_legacy_allowance_without_a_hash_stays_usable(client):
+    from tests.fakes import seed_allowance
+    c, pp = client
+    aid = seed_allowance(pp.engine, amount=10)  # created before owner tokens: no hash
+    assert c.post(f"/allowance/{aid}/close?force=true").status_code == 200

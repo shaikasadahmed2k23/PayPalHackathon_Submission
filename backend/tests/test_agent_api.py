@@ -258,7 +258,7 @@ def test_remote_mcp_end_to_end(env, monkeypatch):
         names = {t["name"] for t in rpc("tools/list")["tools"]}
         assert names == {"leashpay_wallet", "leashpay_search_store", "leashpay_buy",
                          "leashpay_purchases", "leashpay_check_purchase", "leashpay_refund"}
-        assert "Allowance remaining: $30.00" in call("leashpay_wallet")
+        assert "Left on hold: $30.00 of $30.00" in call("leashpay_wallet")
         assert "Potato Chips" in call("leashpay_search_store", {"query": "chips"})
         chips = pid(engine, "Potato Chips")
         assert call("leashpay_buy", {"items": [{"product_id": chips, "qty": 1}], "note": "x"}).startswith("PASS: bought")
@@ -283,3 +283,50 @@ def test_stdio_server_descriptions_match_backend():
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     for name in ("WALLET_DESC", "SEARCH_DESC", "BUY_DESC", "PURCHASES_DESC", "CHECK_DESC", "REFUND_DESC"):
         assert getattr(mod, name) == getattr(tools_text, name), name
+
+
+# ---- polish: balance wording, reason order, audit of successful purchases ----------------------
+
+def test_refund_is_gross_spend_and_does_not_refill_the_hold(env):
+    c, engine, pp, aid = env
+    key = new_key(c, aid)["key"]
+    h = {"X-Agent-Key": key}
+    p = buy(c, key, engine, ("Potato Chips", 1)).json()["purchases"][0]
+    r = c.post("/agent-api/refund", headers=h, json={"purchase_id": p["purchase_id"]}).json()
+    assert "Refunded $2.50 to your PayPal balance" in r["text"] and "Your hold stays at $27.50" in r["text"]
+    w = c.get("/agent-api/wallet", headers=h).json()
+    assert w["remaining"] == 27.5 and w["spent"] == 2.5 and w["spent_today"] == 2.5  # not netted
+    assert w["refunded_total"] == 2.5 and w["refunded_today"] == 2.5
+    assert ("Left on hold: $27.50 of $30.00. Spent: $2.50 ($2.50 today). Refunded: $2.50 "
+            "(returned to your PayPal balance - refunds don't refill the hold).") in w["text"]
+    info = c.get(f"/allowance/{aid}").json()
+    assert info["spent_today"] == 2.5 and info["refunded_total"] == 2.5 and info["refunded_today"] == 2.5
+
+
+def test_rule_violations_come_before_the_agent_cap(env):
+    c, engine, pp, aid = env
+    key = new_key(c, aid, cap=5)["key"]
+    r = buy(c, key, engine, ("IPA Pint", 1)).json()  # $6 alcohol, cap $5
+    assert r["purchases"][0]["reasons"] == ["Alcohol is blocked by your rules",
+                                            "Over the $5.00 cap you set for Claude Desktop"]
+
+
+def test_successful_agent_purchase_is_audited_as_external_agent(env):
+    c, engine, pp, aid = env
+    key = new_key(c, aid, name="My Bot")
+    buy(c, key["key"], engine, ("Potato Chips", 1))
+    with Session(engine) as s:
+        rows = {r.action: r for r in s.exec(select(AuditLog).where(AuditLog.actor == "external_agent")).all()}
+    for action in ("judge_spend", "capture"):
+        assert rows[action].payload_json["agent"] == "My Bot"
+        assert rows[action].payload_json["key_prefix"] == key["key_prefix"]
+
+
+def test_user_approving_an_agent_purchase_keeps_the_agent_name(env):
+    c, engine, pp, aid = env
+    key = new_key(c, aid, name="My Bot")["key"]
+    buy(c, key, engine, ("Potato Chips", 2), ("Cookies", 1))
+    assert c.post("/approvals/1/approve", json={}).status_code == 200
+    with Session(engine) as s:
+        cap = s.exec(select(AuditLog).where(AuditLog.action == "capture")).all()
+        assert cap and cap[-1].actor.value == "external_agent" and cap[-1].payload_json["agent"] == "My Bot"

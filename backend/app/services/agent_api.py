@@ -18,9 +18,9 @@ from app.agents.shopping_agent import search_products
 from app.models import AgentKey, Allowance, AllowanceStatus, Policy as PolicyRow, Purchase, PurchaseStatus
 from app.policy.schema import Policy
 from app.services.purchase import (
-    PurchaseOut, buy_items, line_names, list_purchases, money, purchase_out, refund_purchase,
+    PurchaseOut, balance_line, buy_items, line_names, list_purchases, money, purchase_out, refund_purchase, refund_text,
 )
-from app.services.spend import get_spend_context
+from app.services.spend import compute_refunds, get_spend_context
 
 KEY_PREFIX = "lpk_"
 ACTOR = "external_agent"
@@ -93,11 +93,13 @@ def wallet(session: Session, key: AgentKey, allowance: Allowance) -> dict[str, A
     if key.per_purchase_cap is not None:
         rules.append(f"Your own cap: {money(key.per_purchase_cap)} per purchase (set by the user for {key.name})")
     pending = [p for p in list_purchases(session, allowance.id) if p.status == "PENDING_APPROVAL"]  # type: ignore[arg-type]
-    text = (f"Allowance remaining: {money(ctx.allowance_remaining)} of {money(allowance.amount)}. "
-            f"Spent today: {money(ctx.spent_today)}. {len(pending)} purchase(s) waiting for the user's approval.\n"
+    refunded, refunded_today = compute_refunds(session, allowance.id)  # type: ignore[arg-type]
+    text = (f"{balance_line(session, allowance)} {len(pending)} purchase(s) waiting for the user's approval.\n"
             "Rules you must live within:\n" + "\n".join(f"- {r}" for r in rules))
     return {"allowance_id": allowance.id, "currency": policy.currency, "amount": allowance.amount,
-            "remaining": ctx.allowance_remaining, "spent_today": ctx.spent_today, "rules": rules,
+            "remaining": ctx.allowance_remaining, "spent": allowance.captured_total,
+            "spent_today": ctx.spent_today, "refunded_total": refunded, "refunded_today": refunded_today,
+            "rules": rules,
             "agent": {"name": key.name, "per_purchase_cap": key.per_purchase_cap},
             "pending_approvals": len(pending), "text": text}
 
@@ -156,7 +158,7 @@ async def buy(session: Session, key: AgentKey, allowance: Allowance, items: list
               for s in res.skipped if not s.item.endswith(")")]  # unknown products; groups are in purchases
     if not lines:
         lines = ["Nothing was bought: none of those product_ids exist. Use leashpay_search_store first."]
-    lines.append(f"Charged now: {money(res.charged)}. Allowance remaining: {money(remaining)}.")
+    lines.append(f"Charged now: {money(res.charged)}. Left on hold: {money(remaining)}.")
     return {"purchases": [_purchase_dict(p) for p in res.purchases],
             "skipped": [s.model_dump() for s in res.skipped], "charged": round(res.charged, 2),
             "remaining": remaining, "text": "\n".join(lines)}
@@ -195,7 +197,7 @@ async def refund(session: Session, key: AgentKey, allowance: Allowance, purchase
                                 actor=ACTOR, agent_key=key)
     if res.refund:
         r = res.refund
-        text = (f"Refunded {money(r.amount)} for {', '.join(r.items)} (purchase #{r.purchase_id}). "
-                f"Allowance remaining: {money(_remaining(session, allowance))}.")
+        text = (f"{refund_text(r.amount, _remaining(session, allowance))} "
+                f"(Items: {', '.join(r.items)}, purchase #{r.purchase_id}.)")
         return {"refunded": True, "amount": r.amount, "refund_id": r.refund_id, "status": r.status, "text": text}
     return {"refunded": False, "amount": 0.0, "text": f"Nothing refunded: {res.note}"}

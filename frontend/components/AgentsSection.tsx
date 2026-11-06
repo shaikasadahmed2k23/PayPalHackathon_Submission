@@ -51,7 +51,7 @@ export default function AgentsSection({ allowanceId, online }: { allowanceId: nu
 
   const load = useCallback(async () => {
     try {
-      setKeys(await api<AgentKeyInfo[]>(`/allowance/${allowanceId}/agent-keys`));
+      setKeys(await api<AgentKeyInfo[]>(`/allowance/${allowanceId}/agent-keys`, { owner: allowanceId }));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't load agents");
     }
@@ -70,6 +70,7 @@ export default function AgentsSection({ allowanceId, online }: { allowanceId: nu
       if (capNum !== null && !(capNum > 0)) throw new Error("The cap must be a positive amount");
       const made = await api<AgentKeyCreated>(`/allowance/${allowanceId}/agent-keys`, {
         body: { name: name.trim(), per_purchase_cap: capNum },
+        owner: allowanceId,
       });
       setCreated(made);
       setAdding(false);
@@ -86,7 +87,7 @@ export default function AgentsSection({ allowanceId, online }: { allowanceId: nu
   async function revoke(k: AgentKeyInfo) {
     setError("");
     try {
-      await api(`/agent-keys/${k.id}`, { method: "DELETE" });
+      await api(`/agent-keys/${k.id}`, { method: "DELETE", owner: allowanceId });
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't revoke that agent");

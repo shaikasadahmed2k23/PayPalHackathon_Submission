@@ -71,6 +71,7 @@ class Allowance(SQLModel, table=True):
     device_pubkey: Optional[str] = None
     certificate: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     expires_at: Optional[datetime] = Field(default=None, sa_type=TZ)
+    owner_token_hash: Optional[str] = None  # sha256 of the lpo_ token; NULL = legacy allowance, still open
 
 
 class Merchant(SQLModel, table=True):

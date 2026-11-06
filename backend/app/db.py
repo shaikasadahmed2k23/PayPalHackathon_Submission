@@ -30,17 +30,25 @@ engine = make_engine(get_settings().database_url)
 
 def init_db() -> None:
     SQLModel.metadata.create_all(engine)
-    if engine.dialect.name == "sqlite":  # fresh Postgres DBs get every column from create_all
-        _add_missing_columns()
-    else:
+    _add_missing_columns()
+    if engine.dialect.name != "sqlite":
         _add_missing_enum_values()
 
 
 def _add_missing_columns() -> None:
-    """create_all never alters existing tables; top up the few columns added after Task 5 (SQLite only)."""
-    if "created_at" not in {c["name"] for c in inspect(engine).get_columns("purchase")}:
+    """create_all never alters existing tables; top up the columns added after the first deploy."""
+    if engine.dialect.name == "sqlite":
+        def have(table: str) -> set[str]:
+            return {c["name"] for c in inspect(engine).get_columns(table)}
+
         with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE purchase ADD COLUMN created_at TIMESTAMP"))
+            if "created_at" not in have("purchase"):
+                conn.execute(text("ALTER TABLE purchase ADD COLUMN created_at TIMESTAMP"))
+            if "owner_token_hash" not in have("allowance"):
+                conn.execute(text("ALTER TABLE allowance ADD COLUMN owner_token_hash VARCHAR"))
+    else:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE allowance ADD COLUMN IF NOT EXISTS owner_token_hash VARCHAR"))
 
 
 def _add_missing_enum_values() -> None:

@@ -287,17 +287,20 @@ def test_status_is_built_in_code_with_no_extra_llm_call(env):
     llm.intent = {"intent": "status"}
     llm.calls.clear()
     r = chat(engine, aid, "how much have I spent?")
-    assert "spent $3.50 today" in r.reply and "$26.50 left of your $30.00" in r.reply
+    assert "Left on hold: $26.50 of $30.00" in r.reply and "Spent: $3.50 ($3.50 today)" in r.reply
     assert "Chai Corner $3.50 (captured)" in r.reply
     assert len(llm.calls) == 1  # the one structured call, nothing to phrase
 
 
-def test_refund_reduces_spent_today(env):
+def test_refund_does_not_net_spent_or_refill_the_hold(env):
     engine, pp, llm, aid = env
     p = buy(engine, llm, aid, [("Cookies", 1)]).purchases[0]
-    refund_chat(engine, llm, aid, [{"purchase_id": p.id, "product_id": 0}])
+    r = refund_chat(engine, llm, aid, [{"purchase_id": p.id, "product_id": 0}])
+    assert "Refunded $3.50 to your PayPal balance" in r.reply and "Your hold stays at $26.50" in r.reply
     llm.intent = {"intent": "status"}
-    assert "spent $0.00 today" in chat(engine, aid, "spent?").reply
+    reply = chat(engine, aid, "spent?").reply
+    assert "Left on hold: $26.50 of $30.00. Spent: $3.50 ($3.50 today)." in reply
+    assert "Refunded: $3.50 (returned to your PayPal balance - refunds don't refill the hold)" in reply
 
 
 def _down(monkeypatch):
@@ -319,7 +322,7 @@ def test_llm_outage_status_still_answers_from_the_ledger(env, monkeypatch):
     buy(engine, llm, aid, [("Cookies", 1)])
     _down(monkeypatch)
     r = chat(engine, aid, "How much have I spent?")
-    assert r.intent == "status" and "spent $3.50 today" in r.reply
+    assert r.intent == "status" and "Spent: $3.50 ($3.50 today)" in r.reply
 
 
 def test_llm_outage_refund_matches_item_by_keyword(env, monkeypatch):

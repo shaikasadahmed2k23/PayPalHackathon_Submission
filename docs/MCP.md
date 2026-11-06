@@ -110,9 +110,17 @@ or a route outside the agent API.
 
 - A request carrying an agent key is refused (`403`) on every route except `/agent-api`, `/mcp` and `/health`,
   so a well-behaved agent cannot reach `/approvals`, `/policy` or `/allowance/.../close`.
-- **Honest limit:** this demo has a single user and no login. The user-side routes (approve, close, rules) are
-  open to anyone who can reach the API *without* an agent key. The key guard protects against an agent using
-  its own key, not against a determined attacker who knows the URLs. A production deployment needs real user
-  authentication on those routes.
+- **Owner token (no login, but owner actions are protected).** Creating an allowance returns an `lpo_` token
+  once (only its sha256 is stored); the wallet keeps it in IndexedDB and sends `X-Owner-Token` for authorize,
+  approve / deny, close, agent-key create / list / revoke, `issued` and `test-spend`. Without it those routes
+  answer `401`. An agent key never passes: it is a different credential and is refused on those routes anyway.
+  Reads used by the dashboard, `/policy/parse`, `/vouchers/settle` (signature-protected), `/merchants`,
+  `/products` and `/health` stay open. Allowances created before this existed have no token and stay usable.
+- **Honest limits:** there is still no user login. Whoever holds the owner token is the owner, so it lives only
+  on the device that created the allowance (lose it and you cannot approve or close from another device).
+  `/agent/chat` and the read-only dashboard endpoints are open in this single-demo-user app.
+- **Balance wording:** spent money cannot go back onto a PayPal hold. A refund lands in the buyer's PayPal
+  balance, so `Left on hold` does not grow and `Spent` (gross captured) does not shrink; refunds are reported
+  separately (`refunded_total`, `refunded_today`).
 - The key is sent in a header over HTTPS; treat it like a password. Revoke it from the wallet if it leaks.
 - Sandbox PayPal only. Amounts are fake money.

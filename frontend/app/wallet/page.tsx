@@ -35,7 +35,7 @@ export default function Wallet() {
 
   const reportIssued = useCallback(async (w: WalletRecord) => {
     try {
-      await api(`/allowance/${w.allowance_id}/issued`, { body: { highest_serial: highestIssued(w) } });
+      await api(`/allowance/${w.allowance_id}/issued`, { body: { highest_serial: highestIssued(w) }, owner: w.allowance_id });
     } catch {
       /* best effort; retried on the next refresh */
     }
@@ -122,7 +122,7 @@ export default function Wallet() {
     if (!wallet) return;
     setBusyId(-1);
     try {
-      const r = await api<{ captured_total: number }>(`/allowance/${wallet.allowance_id}/close?force=${(closing?.unsynced ?? 0) > 0}`, { method: "POST", body: {} });
+      const r = await api<{ captured_total: number }>(`/allowance/${wallet.allowance_id}/close?force=${(closing?.unsynced ?? 0) > 0}`, { method: "POST", body: {}, owner: wallet.allowance_id });
       const amount = snap?.info.amount ?? 0;
       setClosedMsg(`Unused ${money(Math.max(amount - r.captured_total, 0))} returned to your PayPal.`);
       setClosing(null);
@@ -137,7 +137,7 @@ export default function Wallet() {
   async function decide(a: Approval, action: "approve" | "deny") {
     setBusyId(a.id);
     try {
-      await api(`/approvals/${a.id}/${action}`, { method: "POST", body: {} });
+      await api(`/approvals/${a.id}/${action}`, { method: "POST", body: {}, owner: a.allowance_id });
       if (wallet) await refresh(wallet);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't update that approval");
@@ -156,12 +156,12 @@ export default function Wallet() {
   return (
     <Shell title="Wallet">
       <section className="card">
-        <p className="label">Left to spend</p>
+        <p className="label">Left on hold</p>
         <p className="num mt-1 text-[3.6rem] leading-none text-accent">{info ? money(info.remaining) : "—"}</p>
         <div className="mt-4 flex items-end justify-between text-sm">
           <div>
-            <p className="label">Spent today</p>
-            <p className="num text-xl">{info ? money(info.spent_today) : "—"}</p>
+            <p className="label">Spent</p>
+            <p className="num text-xl">{info ? money(info.captured_total) : "—"}</p>
           </div>
           <div className="text-right">
             <p className="label">Allowance</p>
@@ -169,6 +169,11 @@ export default function Wallet() {
           </div>
           <span className={info ? pillClass(info.status) : "chip"}>{info?.status ?? "…"}</span>
         </div>
+        {info && info.refunded_total > 0 && (
+          <p className="mt-3 text-xs text-muted">
+            Refunded {money(info.refunded_total)} → back in your PayPal balance. Refunds don&apos;t refill the hold.
+          </p>
+        )}
         {snap && !online && (
           <p className="mt-3 text-xs text-muted">Offline · numbers as of {new Date(snap.at).toLocaleTimeString()}</p>
         )}

@@ -40,7 +40,7 @@ function Finish() {
         setStep("Creating this phone's secret key…");
         const device_pubkey_b64 = await generateDeviceKey(id); // private key stays in IndexedDB
         setStep("Confirming the hold with PayPal…");
-        const out = await api<AuthorizeOut>(`/allowance/${id}/authorize`, { body: { device_pubkey_b64 } });
+        const out = await api<AuthorizeOut>(`/allowance/${id}/authorize`, { body: { device_pubkey_b64 }, owner: id });
         await putWallet({
           allowance_id: id,
           certificate: out.certificate,

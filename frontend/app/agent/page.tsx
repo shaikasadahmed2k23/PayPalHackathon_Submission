@@ -127,7 +127,7 @@ export default function AgentPage() {
     setBusyId(p.id);
     setError("");
     try {
-      await api(`/approvals/${p.approval_id}/${action}`, { method: "POST", body: {} });
+      await api(`/approvals/${p.approval_id}/${action}`, { method: "POST", body: {}, owner: allowanceId });
       const fresh = await api<PurchaseOut[]>(`/purchases?allowance_id=${allowanceId}`);
       setLive((l) => ({ ...l, ...Object.fromEntries(fresh.map((x) => [x.id, x])) }));
     } catch (e) {

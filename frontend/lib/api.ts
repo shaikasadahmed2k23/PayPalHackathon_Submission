@@ -1,3 +1,5 @@
+import { getOwnerToken } from "./store";
+
 /** Build-time constant: baked into the JS bundle by `next build`. Changing it means rebuilding the web service. */
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
@@ -42,8 +44,13 @@ function isColdStart(status: number, data: unknown): boolean {
   return status === 502 && !(data && typeof data === "object" && "detail" in data);
 }
 
-export async function api<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
+/** owner: allowance id whose owner token (saved on this device) is sent as X-Owner-Token. */
+export async function api<T>(path: string, init?: { method?: string; body?: unknown; owner?: number }): Promise<T> {
   const started = Date.now();
+  const ownerToken = init?.owner !== undefined ? await getOwnerToken(init.owner).catch(() => undefined) : undefined;
+  const headers: Record<string, string> = {};
+  if (init?.body !== undefined) headers["Content-Type"] = "application/json";
+  if (ownerToken) headers["X-Owner-Token"] = ownerToken;
   for (;;) {
     const slow = setTimeout(() => setWaking(true), SLOW_MS);
     let res: Response | null = null;
@@ -51,7 +58,7 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
     try {
       res = await fetch(API_URL + path, {
         method: init?.method ?? (init?.body !== undefined ? "POST" : "GET"),
-        headers: init?.body !== undefined ? { "Content-Type": "application/json" } : undefined,
+        headers,
         body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
       });
       text = await res.text();

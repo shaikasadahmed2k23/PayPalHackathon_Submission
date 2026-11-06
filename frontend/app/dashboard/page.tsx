@@ -194,8 +194,8 @@ export default function Dashboard() {
       {summary && (
         <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <Kpi label="Held" value={money(summary.held)} />
-          <Kpi label="Captured" value={money(summary.captured)} tone="text-accent" />
-          <Kpi label="Refunded" value={money(summary.refunded)} tone="text-warn" />
+          <Kpi label="Spent (captured)" value={money(summary.captured)} tone="text-accent" />
+          <Kpi label="Refunded to PayPal balance" value={money(summary.refunded)} tone="text-warn" />
           <Kpi label="Returned on close" value={summary.status === "CLOSED" ? money(summary.returned_on_close) : "—"} tone="text-ok" />
           <Kpi label="Blocked attempts" value={String(summary.blocked_attempts)} tone="text-bad" />
           <Kpi label="Offline settled / rejected" value={`${summary.vouchers_settled} / ${summary.vouchers_rejected}`} />

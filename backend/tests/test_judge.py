@@ -173,3 +173,13 @@ def test_offline_disabled_is_a_rule_violation_listed_before_limits():
     p = make_policy(offline=OfflinePolicy(enabled=False, per_tap_max=5.0))
     v = judge(p, spend(100, channel="offline"), ctx())
     assert v.reasons[0] == "Offline payments are turned off in your rules" and "per-purchase" in v.reasons[1]
+
+
+def test_agent_cap_is_a_limit_after_rule_violations_and_before_other_limits():
+    p = make_policy(per_tx_max=4.0)
+    v = judge(p, spend(6, category="alcohol"), ctx(), agent_cap=5, agent_name="Bot")
+    assert v.reasons == ["Alcohol is blocked by your rules", "Over the $5.00 cap you set for Bot",
+                         "$6.00 is over your $4.00 per-purchase limit"]
+    assert judge(p, spend(3), ctx(), agent_cap=5, agent_name="Bot").decision == "PASS"
+    assert judge(p, spend(5.0), ctx(), agent_cap=5, agent_name="Bot").decision == "FAIL"  # per_tx_max 4
+    assert judge(make_policy(), spend(5.0), ctx(), agent_cap=5, agent_name="Bot").decision == "PASS"
