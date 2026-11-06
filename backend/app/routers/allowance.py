@@ -75,8 +75,8 @@ async def create_allowance(
     try:
         order_id, approve_url = await get_paypal_client().create_allowance_order(
             body.amount,
-            return_url=f"{front}/setup/return?allowance_id={allowance.id}",
-            cancel_url=f"{front}/setup",
+            return_url=f"{front}/setup/return/?allowance_id={allowance.id}",
+            cancel_url=f"{front}/setup/",
         )
     except Exception:
         session.delete(allowance)  # don't leave an allowance with no PayPal order

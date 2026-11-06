@@ -1,4 +1,5 @@
-# Render Blueprint: two free web services in Singapore. Secrets use sync:false (you paste them in the dashboard).
+# Render Blueprint: one free web service (API) + one free STATIC SITE (frontend). Static sites don't use the 750
+# free instance hours and never spin down. Secrets use sync:false (you paste them in the dashboard).
 services:
   - type: web
     name: leashpay-api
@@ -36,21 +37,49 @@ services:
         sync: false
       - key: SERVER_SIGNING_KEY
         sync: false
-      - key: FRONTEND_URL
-        sync: false
-      - key: CORS_ORIGINS
-        sync: false
+      - key: FRONTEND_URL  # where PayPal sends the buyer back (the static site)
+        value: https://leashpay.onrender.com
+      - key: CORS_ORIGINS  # new static site + the old leashpay-web during the switch (remove it afterwards)
+        value: https://leashpay.onrender.com,https://leashpay-web.onrender.com
 
   - type: web
-    name: leashpay-web
-    runtime: node
-    region: singapore
-    plan: free
+    name: leashpay
+    runtime: static
     rootDir: frontend
     buildCommand: npm ci && npm run build
-    startCommand: npm start
+    staticPublishPath: out
     envVars:
       - key: NODE_VERSION
         value: 22
-      - key: NEXT_PUBLIC_API_URL
+      - key: NEXT_PUBLIC_API_URL  # build-time: change it, then redeploy the site
         sync: false
+    headers:
+      # Never serve a stale shell: HTML, the service worker and the manifest are revalidated every time.
+      - path: /sw.js
+        name: Cache-Control
+        value: no-cache, no-store, must-revalidate
+      - path: /
+        name: Cache-Control
+        value: no-cache
+      - path: /wallet/*
+        name: Cache-Control
+        value: no-cache
+      - path: /merchant/*
+        name: Cache-Control
+        value: no-cache
+      - path: /setup/*
+        name: Cache-Control
+        value: no-cache
+      - path: /agent/*
+        name: Cache-Control
+        value: no-cache
+      - path: /dashboard/*
+        name: Cache-Control
+        value: no-cache
+      - path: /manifest.webmanifest
+        name: Cache-Control
+        value: no-cache
+      # Hashed build output never changes.
+      - path: /_next/static/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
