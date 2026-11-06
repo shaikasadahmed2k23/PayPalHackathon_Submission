@@ -18,6 +18,10 @@ services:
         value: gemini
       - key: LLM_FALLBACK
         value: groq
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
       - key: PAYPAL_CLIENT_ID
         sync: false
       - key: PAYPAL_CLIENT_SECRET

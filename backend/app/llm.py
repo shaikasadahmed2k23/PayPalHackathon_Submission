@@ -82,18 +82,21 @@ def _call_groq(system: str, user: str, schema: type[BaseModel]) -> str:
         f"{system}\n\nRespond with a single JSON object matching this JSON Schema:\n"
         f"{json.dumps(schema.model_json_schema())}"
     )
+    body: dict = {
+        "model": s.groq_model,
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+    }
+    if "gpt-oss" in s.groq_model:
+        body["reasoning_effort"] = "low"  # reasoning model: keep it fast and cheap for small JSON tasks
     resp = httpx.post(
         GROQ_URL,
         headers={"Authorization": f"Bearer {s.groq_api_key}"},
-        json={
-            "model": s.groq_model,
-            "temperature": 0,
-            "response_format": {"type": "json_object"},
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        },
+        json=body,
         timeout=60.0,
     )
     if resp.status_code == 429:

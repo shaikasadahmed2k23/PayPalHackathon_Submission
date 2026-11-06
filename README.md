@@ -19,3 +19,11 @@ See [CLAUDE.md](CLAUDE.md) for the full spec. (This README is a stub; more secti
   unsynced vouchers then cannot be paid.
 - **Idempotency keys** are `voucher-{paypal_authorization_id}-{serial}` (also the payout
   `sender_batch_id`), so they stay unique across database resets and are identical on retry.
+
+## Bring your own agent (MCP)
+
+LeashPay is also a leash for *other people's* AI agents. Create an agent key in the wallet
+(**AI agents on your leash**), point Claude Desktop (or any MCP client) at `mcp_server/server.py` or at the
+remote `/mcp` endpoint, and the agent can search, buy, check and refund, while the Policy Judge still enforces
+every cent. It can never change your rules, approve its own purchases or close the allowance.
+Setup, Claude Desktop config for Windows, MCP Inspector and security notes: [docs/MCP.md](docs/MCP.md).

@@ -11,7 +11,7 @@ from app.llm import LLMError
 from app.main import app
 from app.models import Allowance, AuditLog, LedgerEntry, Merchant, Product, Purchase
 from app.seed import seed_if_empty
-from app.services import spend as spend_mod
+from app.services import purchase as purchase_mod, spend as spend_mod
 from tests.fakes import FakePayPal, make_engine, seed_allowance
 
 POLICY = {"allowed_categories": ["food", "transport"], "blocked_categories": ["alcohol"],
@@ -40,7 +40,7 @@ class FakeLLM:
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     pp, llm = FakePayPal(), FakeLLM()
-    for mod in (spend_mod, agent):
+    for mod in (spend_mod, purchase_mod):
         monkeypatch.setattr(mod, "get_paypal_client", lambda: pp)
     monkeypatch.setattr(agent, "generate_json", llm)
     spend_mod._locks.clear()

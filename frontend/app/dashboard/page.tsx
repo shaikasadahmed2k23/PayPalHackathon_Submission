@@ -33,6 +33,7 @@ const mono = { cellRenderer: Mono, width: 200 } as const;
 const wrap = { cellRenderer: Reasons, cellClass: "reason-cell", wrapText: true, autoHeight: true, flex: 2, minWidth: 260 } as const;
 
 // Agent chatter that is not a decision; hidden by the "Decisions only" toggle.
+const ACTORS = ["external_agent", "shopping_agent", "policy_judge", "settlement_agent", "merchant", "system", "user"];
 const CHATTER = new Set(["intent", "propose_cart"]);
 
 function Kpi({ label, value, tone = "" }: { label: string; value: string; tone?: string }) {
@@ -50,6 +51,7 @@ export default function Dashboard() {
   const [tab, setTab] = useState<Tab>("audit");
   const [filter, setFilter] = useState("");
   const [decisionsOnly, setDecisionsOnly] = useState(true);
+  const [actorFilter, setActorFilter] = useState("");
   const [error, setError] = useState("");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [audit, setAudit] = useState<AuditRow[]>([]);
@@ -116,13 +118,17 @@ export default function Dashboard() {
     };
   }, [loadList, load]);
 
-  const shownAudit = useMemo(() => (decisionsOnly ? audit.filter((r) => !CHATTER.has(r.action)) : audit), [audit, decisionsOnly]);
+  const shownAudit = useMemo(
+    () => audit.filter((r) => (!decisionsOnly || !CHATTER.has(r.action)) && (!actorFilter || r.actor === actorFilter)),
+    [audit, decisionsOnly, actorFilter],
+  );
 
   const cols = useMemo(() => {
     const audit_: ColDef<AuditRow>[] = [
       { field: "id", headerName: "#", width: 80, sort: "desc" },
       { field: "ts", headerName: "Time", valueFormatter: (p) => when(p.value), width: 180 },
       { field: "actor", width: 150 },
+      { headerName: "Agent", width: 150, valueGetter: (p) => (p.data?.payload_json?.agent as string | undefined) ?? "" },
       { field: "action", width: 170 },
       { field: "verdict", ...pill },
       { field: "reasons", ...wrap },
@@ -209,6 +215,16 @@ export default function Dashboard() {
           ))}
         </div>
         <div className="flex items-center gap-4">
+          {tab === "audit" && (
+            <select className="field !w-auto !py-2" value={actorFilter} onChange={(e) => setActorFilter(e.target.value)} aria-label="Actor">
+              <option value="">All actors</option>
+              {ACTORS.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          )}
           {tab === "audit" && (
             <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold">
               <input type="checkbox" className="h-4 w-4 accent-[#0070e0]" checked={decisionsOnly} onChange={(e) => setDecisionsOnly(e.target.checked)} />

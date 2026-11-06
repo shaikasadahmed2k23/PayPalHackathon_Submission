@@ -123,3 +123,19 @@ export interface AgentReply {
   skipped: { item: string; reasons: string[] }[];
   refunds: { purchase_id: number; amount: number; refund_id: string; status: string; items: string[] }[];
 }
+
+export interface AgentKeyInfo {
+  id: number;
+  allowance_id: number;
+  name: string;
+  key_prefix: string;
+  per_purchase_cap: number | null;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+/** Returned once, when the key is created. */
+export interface AgentKeyCreated extends AgentKeyInfo {
+  key: string;
+}

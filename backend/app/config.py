@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"  # comma-separated list of allowed browser origins
     merchant_payout_email: str = ""  # sandbox business account that receives all demo payouts
 
-    gemini_model: str = "gemini-2.5-flash"
-    groq_model: str = "llama-3.3-70b-versatile"
+    gemini_model: str = "gemini-3.5-flash-lite"
+    groq_model: str = "openai/gpt-oss-120b"
 
     @property
     def is_production(self) -> bool:

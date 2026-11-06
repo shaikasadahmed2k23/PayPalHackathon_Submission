@@ -92,6 +92,7 @@ async def spend(
     source_id: Optional[str],
     request_id: str,
     skip_approval: bool = False,
+    audit_extra: Optional[dict[str, Any]] = None,
 ) -> SpendResult:
     """skip_approval=True is for spends the user already approved; FAIL rules still apply."""
     req = SpendRequest(
@@ -125,6 +126,7 @@ async def spend(
             "source": source,
             "source_id": source_id,
             "checks": [c.model_dump() for c in verdict.checks],
+            **(audit_extra or {}),  # e.g. which external agent asked
         }
 
         if verdict.decision == "NEEDS_APPROVAL":

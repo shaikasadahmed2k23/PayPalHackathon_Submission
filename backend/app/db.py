@@ -32,6 +32,8 @@ def init_db() -> None:
     SQLModel.metadata.create_all(engine)
     if engine.dialect.name == "sqlite":  # fresh Postgres DBs get every column from create_all
         _add_missing_columns()
+    else:
+        _add_missing_enum_values()
 
 
 def _add_missing_columns() -> None:
@@ -39,6 +41,14 @@ def _add_missing_columns() -> None:
     if "created_at" not in {c["name"] for c in inspect(engine).get_columns("purchase")}:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE purchase ADD COLUMN created_at TIMESTAMP"))
+
+
+def _add_missing_enum_values() -> None:
+    """create_all never alters an existing Postgres ENUM; add the labels introduced after first deploy."""
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        exists = conn.execute(text("SELECT 1 FROM pg_type WHERE typname = 'actor'")).first()
+        if exists:
+            conn.execute(text("ALTER TYPE actor ADD VALUE IF NOT EXISTS 'EXTERNAL_AGENT'"))
 
 
 def check_db() -> str:

@@ -4,6 +4,7 @@
 import { QRCodeSVG } from "qrcode.react";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import AgentsSection from "@/components/AgentsSection";
 import { ErrorNote, Shell } from "@/components/Shell";
 import { api, money } from "@/lib/api";
 import { useOnline } from "@/lib/hooks";
@@ -227,6 +228,8 @@ export default function Wallet() {
           ))
         )}
       </section>
+
+      {info?.status === "ACTIVE" && <AgentsSection allowanceId={wallet.allowance_id} online={online} />}
 
       {closedMsg && <p className="rounded-2xl border border-ok/40 bg-ok/10 px-4 py-3 font-semibold text-ok">{closedMsg}</p>}
 

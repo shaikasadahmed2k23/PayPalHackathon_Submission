@@ -143,3 +143,11 @@ Real-world shopping/scraping, NFC/Bluetooth, real INR/UPI, user auth/multi-user 
 - Env: `APP_ENV=production` requires `SERVER_SIGNING_KEY` (`backend/scripts/gen_signing_key.py`); `CORS_ORIGINS` comma-separated; `GET /health` checks the DB and returns `{status, db: sqlite|postgresql}`.
 - Frontend `NEXT_PUBLIC_API_URL` is build-time; `lib/api.ts` retries cold-start failures and shows a "Waking up the server" banner.
 - Deploy: `render.yaml` (Blueprint, Singapore, free) + `docs/DEPLOY.md`.
+
+## Task 9 additions (MCP: bring your own agent)
+- LLM defaults: `GEMINI_MODEL=gemini-3.5-flash-lite`, `GROQ_MODEL=openai/gpt-oss-120b` (Groq call adds `reasoning_effort: low` for gpt-oss); `backend/scripts/check_llm.py` pings each provider.
+- `app/services/purchase.py`: `buy_items()` / `refund_purchase()` are the one deterministic buy/refund path (group by merchant -> dry-run judge -> `spend()` -> Purchase rows). The chat agent and external agents both use it; prices only from the DB.
+- `AgentKey` (sha256 hash only, `lpk_` + 32 chars, optional `per_purchase_cap`, revocable). Audit actor `external_agent` (payload has `agent` + `key_prefix`); `init_db` adds the label to the live Postgres `actor` enum.
+- `POST/GET /allowance/{id}/agent-keys`, `DELETE /agent-keys/{id}` (owner side). Agent side `/agent-api/*` (header `X-Agent-Key`), logic in `app/services/agent_api.py`. `AgentKeyGuard` in `main.py` returns 403 for agent keys on any other route.
+- MCP: `mcp_server/` (stdio, calls the REST API, own requirements, tests: `python -m pytest mcp_server`) and `/mcp` on the backend (`app/mcp_http.py`, Streamable HTTP, Bearer key). Pinned `mcp<2` (v2 renamed FastMCP). Tool descriptions live in `app/tools_text.py` and `mcp_server/tool_text.py` (a test keeps them identical).
+- Frontend: `components/AgentsSection.tsx` on `/wallet`; dashboard actor filter + Agent column. Docs: `docs/MCP.md`.

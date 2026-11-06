@@ -16,16 +16,12 @@ from sqlmodel import Session, select
 
 from app import audit
 from app.llm import LLMError, generate_json
-from app.models import (
-    Allowance, Approval, LedgerEntry, Merchant, Policy as PolicyRow, Product, Purchase,
-    PurchaseStatus,
+from app.models import Allowance, Merchant, Product, Purchase, PurchaseStatus
+from app.services.purchase import (  # noqa: F401  (re-exported: routers and tests import them from here)
+    PurchaseOut, RefundOut, SkippedOut, buy_items, line_names as _names, list_purchases, money as _m,
+    purchase_out, refund_purchase, remaining_qty as _remaining,
 )
-from app.paypal import PayPalError, get_paypal_client
-from app.policy.judge import judge
-from app.policy.schema import Policy, SpendRequest
-from app.services.spend import (
-    allowance_lock, get_spend_context, make_request_id, spend,
-)
+from app.services.spend import get_spend_context
 
 logger = logging.getLogger("leashpay.shopping")
 T = TypeVar("T", bound=BaseModel)
@@ -56,31 +52,6 @@ class Turn(BaseModel):
 
 
 # ---- API output -----------------------------------------------------------------------
-
-class PurchaseOut(BaseModel):
-    id: int
-    status: str
-    amount: float
-    merchant: str
-    merchant_id: Optional[int] = None
-    items: list[dict[str, Any]]
-    capture_id: Optional[str] = None
-    approval_id: Optional[int] = None
-    reasons: list[str] = Field(default_factory=list)
-
-
-class SkippedOut(BaseModel):
-    item: str
-    reasons: list[str]
-
-
-class RefundOut(BaseModel):
-    purchase_id: int
-    amount: float
-    refund_id: str
-    status: str
-    items: list[str]
-
 
 class AgentReply(BaseModel):
     conversation_id: str
@@ -115,10 +86,6 @@ Use the recent conversation to resolve words like "it" or "that"."""
 
 
 # ---- helpers --------------------------------------------------------------------------
-
-def _m(x: float) -> str:
-    return f"${x:,.2f}"
-
 
 async def _llm(schema: type[T], system: str, payload: dict[str, Any]) -> T:
     return await asyncio.to_thread(generate_json, system, json.dumps(payload), schema)
@@ -186,28 +153,6 @@ def _refs_from_keywords(message: str, recent: list[Purchase]) -> list["RefundRef
     return []
 
 
-def _names(lines: list[dict[str, Any]]) -> str:
-    return ", ".join(f"{l['qty']}x {l['name']}" if l["qty"] > 1 else l["name"] for l in lines)
-
-
-def purchase_out(session: Session, p: Purchase) -> PurchaseOut:
-    approval = session.exec(
-        select(Approval).where(Approval.source == "purchase", Approval.source_id == str(p.id))
-    ).first()
-    first = p.items_json[0] if p.items_json else {}
-    return PurchaseOut(
-        id=p.id, status=p.status.value, amount=p.amount,  # type: ignore[arg-type]
-        merchant=first.get("merchant", ""), merchant_id=first.get("merchant_id"),
-        items=p.items_json, capture_id=p.capture_id, approval_id=approval.id if approval else None,
-        reasons=p.judge_reasons,
-    )
-
-
-def list_purchases(session: Session, allowance_id: int) -> list[PurchaseOut]:
-    rows = session.exec(select(Purchase).where(Purchase.allowance_id == allowance_id).order_by(Purchase.id)).all()  # type: ignore[arg-type]
-    return [purchase_out(session, p) for p in rows]
-
-
 # ---- buy ------------------------------------------------------------------------------
 
 async def _buy(
@@ -215,7 +160,7 @@ async def _buy(
 ) -> AgentReply:
     catalog = {c["id"]: c for c in candidates}
 
-    # Prices come from the DB; the LLM contributes product ids and quantities only.
+    # Prices come from the DB (buy_items); the LLM contributes product ids and quantities only.
     wanted: dict[int, int] = {}
     for it in turn.items:
         if it.product_id in catalog:  # hallucinated ids are dropped
@@ -241,81 +186,10 @@ async def _buy(
             text = "Everything I found was over your budget, so I bought nothing."
         return AgentReply(conversation_id="", reply=text, intent="buy", skipped=skipped)
 
-    groups: dict[str, list[dict[str, Any]]] = {}
-    for pid in ids:
-        c = catalog[pid]
-        groups.setdefault(c["merchant"], []).append({
-            "product_id": pid, "name": c["name"], "qty": wanted[pid], "unit_price": c["price"],
-            "line_total": round(c["price"] * wanted[pid], 2), "refunded_qty": 0,
-        })
-    merchants = {m.name: m for m in session.exec(select(Merchant)).all()}
-    policy = Policy.model_validate(session.get(PolicyRow, allowance.policy_id).policy_json)  # type: ignore[union-attr]
-    ctx = get_spend_context(session, allowance)
-    audit.log(session, "shopping_agent", "propose_cart", payload={
-        "allowance_id": allowance.id, "message": message, "rationale": turn.rationale,
-        "groups": {k: v for k, v in groups.items()}})
-
-    purchases: list[PurchaseOut] = []
-    lines_out: list[str] = []
-    charged = 0.0
-    for merchant_name, lines in groups.items():
-        merchant = merchants[merchant_name]
-        for l in lines:
-            l["merchant"], l["merchant_id"] = merchant.name, merchant.id
-        amount = round(sum(l["line_total"] for l in lines), 2)
-        desc = _names(lines)
-        purchase = Purchase(allowance_id=allowance.id, items_json=lines, amount=amount,  # type: ignore[arg-type]
-                            status=PurchaseStatus.BLOCKED)
-        session.add(purchase)
-        session.commit()
-        session.refresh(purchase)
-
-        # Dry run: skip a group that would FAIL instead of attempting it.
-        dry = judge(policy, SpendRequest(amount=amount, category=merchant.category,  # type: ignore[arg-type]
-                                         merchant_name=merchant.name, channel="online"), ctx)
-        if dry.decision == "FAIL":
-            purchase.judge_reasons = dry.reasons
-            session.add(purchase)
-            session.commit()
-            audit.log(session, "shopping_agent", "skip_group", verdict="FAIL", reasons=dry.reasons,
-                      payload={"allowance_id": allowance.id, "purchase_id": purchase.id, "merchant": merchant.name, "amount": amount})
-            skipped.append(SkippedOut(item=f"{merchant.name} ({desc})", reasons=dry.reasons))
-            purchases.append(purchase_out(session, purchase))
-            continue
-
-        try:
-            result = await spend(
-                session, allowance.id, amount, merchant.category, merchant.name, "online",  # type: ignore[arg-type]
-                source="purchase", source_id=str(purchase.id),
-                request_id=make_request_id(allowance, "purchase", purchase.id),
-            )
-        except PayPalError as e:
-            purchase.judge_reasons = [f"PayPal capture failed: {e}"]
-            session.add(purchase)
-            session.commit()
-            skipped.append(SkippedOut(item=f"{merchant.name} ({desc})", reasons=purchase.judge_reasons))
-            purchases.append(purchase_out(session, purchase))
-            continue
-
-        session.refresh(purchase)
-        session.refresh(allowance)
-        purchase.judge_reasons = result.verdict.reasons
-        if result.verdict.decision == "PASS":
-            purchase.status, purchase.capture_id = PurchaseStatus.CAPTURED, result.capture_id
-            charged += amount
-            ctx = get_spend_context(session, allowance)  # later groups see this spend
-            lines_out.append(f"Bought {desc} from {merchant.name} for {_m(amount)}.")
-        elif result.verdict.decision == "NEEDS_APPROVAL":
-            purchase.status = PurchaseStatus.PENDING_APPROVAL
-            lines_out.append(
-                f"{desc} from {merchant.name} comes to {_m(amount)}, above your approval limit - "
-                f"I've asked for your approval (nothing charged yet).")
-        else:
-            skipped.append(SkippedOut(item=f"{merchant.name} ({desc})", reasons=result.verdict.reasons))
-        session.add(purchase)
-        session.commit()
-        purchases.append(purchase_out(session, purchase))
-
+    result = await buy_items(session, allowance.id, [{"product_id": i, "qty": wanted[i]} for i in ids],  # type: ignore[arg-type]
+                             actor="shopping_agent", note=message, rationale=turn.rationale)
+    skipped += result.skipped
+    lines_out = list(result.lines)
     if trimmed:
         n = len(trimmed)
         lines_out.append(f"Kept it under {_m(turn.budget)} - left out {n} extra{'s' if n > 1 else ''} "
@@ -323,16 +197,12 @@ async def _buy(
     for s in skipped:
         if s.item not in trimmed:  # rule-blocked groups stay as separate lines
             lines_out.append(f"I skipped {s.item}: {'; '.join(s.reasons)}.")
-    lines_out.append(f"Total charged now: {_m(charged)}.")
+    lines_out.append(f"Total charged now: {_m(result.charged)}.")
     return AgentReply(conversation_id="", reply=" ".join(lines_out), intent="buy",
-                      purchases=purchases, skipped=skipped)
+                      purchases=result.purchases, skipped=skipped)
 
 
 # ---- refund ---------------------------------------------------------------------------
-
-def _remaining(line: dict[str, Any]) -> int:
-    return int(line["qty"]) - int(line.get("refunded_qty", 0))
-
 
 async def _refund(session: Session, allowance: Allowance, refs: list[RefundRef], recent: list[Purchase]) -> AgentReply:
     if not recent:
@@ -355,44 +225,11 @@ async def _refund(session: Session, allowance: Allowance, refs: list[RefundRef],
     refunds: list[RefundOut] = []
     notes: list[str] = []
     for purchase_id, product_ids in wanted.items():
-        async with allowance_lock(allowance.id):  # type: ignore[arg-type]
-            purchase = session.get(Purchase, purchase_id)
-            assert purchase is not None
-            session.refresh(purchase)
-            todo = [l for l in purchase.items_json
-                    if _remaining(l) > 0 and (not product_ids or l["product_id"] in product_ids)]
-            if not todo or not purchase.capture_id:
-                notes.append("That was already refunded." if not todo else "That purchase has no payment to refund.")
-                continue
-            amount = round(sum(l["unit_price"] * _remaining(l) for l in todo), 2)
-            key = f"{purchase.id}-" + "+".join(str(i) for i in sorted(l["product_id"] for l in todo))
-            try:
-                refund_id, status = await get_paypal_client().refund(
-                    purchase.capture_id, amount, make_request_id(allowance, "refund", key))
-            except PayPalError as e:
-                audit.log(session, "shopping_agent", "refund_failed", reasons=[str(e)],
-                          payload={"allowance_id": allowance.id, "purchase_id": purchase.id, "amount": amount})
-                notes.append(f"PayPal couldn't process the refund of {_m(amount)}: {e}")
-                continue
-
-            done = {l["product_id"] for l in todo}
-            purchase.items_json = [
-                {**l, "refunded_qty": l["qty"]} if l["product_id"] in done else l for l in purchase.items_json
-            ]  # new list so SQLAlchemy sees the JSON change
-            full = all(_remaining(l) == 0 for l in purchase.items_json)
-            purchase.status = PurchaseStatus.REFUNDED if full else PurchaseStatus.PARTIALLY_REFUNDED
-            entry = session.exec(select(LedgerEntry).where(
-                LedgerEntry.source == "purchase", LedgerEntry.source_id == str(purchase.id))).first()
-            if entry:
-                entry.refunded_amount = round(entry.refunded_amount + amount, 2)
-                session.add(entry)
-            session.add(purchase)
-            session.commit()
-            audit.log(session, "shopping_agent", "refund", verdict=purchase.status.value, paypal_ref=refund_id,
-                      payload={"allowance_id": allowance.id, "purchase_id": purchase.id, "amount": amount, "status": status,
-                               "items": [l["name"] for l in todo]})
-            refunds.append(RefundOut(purchase_id=purchase.id, amount=amount, refund_id=refund_id,  # type: ignore[arg-type]
-                                     status=status, items=[l["name"] for l in todo]))
+        res = await refund_purchase(session, allowance, purchase_id, product_ids, actor="shopping_agent")
+        if res.refund:
+            refunds.append(res.refund)
+        else:
+            notes.append(res.note)
 
     parts = [f"Refunded {_m(r.amount)} for {', '.join(r.items)} (PayPal refund {r.status.lower()})." for r in refunds]
     parts += notes

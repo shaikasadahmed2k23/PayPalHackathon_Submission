@@ -44,6 +44,7 @@ class Actor(str, Enum):
     POLICY_JUDGE = "policy_judge"
     SETTLEMENT_AGENT = "settlement_agent"
     MERCHANT = "merchant"
+    EXTERNAL_AGENT = "external_agent"
 
 
 class ApprovalStatus(str, Enum):
@@ -159,3 +160,16 @@ class Approval(SQLModel, table=True):
     status: ApprovalStatus = ApprovalStatus.PENDING
     created_at: datetime = Field(default_factory=utcnow, sa_type=TZ)
     decided_at: Optional[datetime] = Field(default=None, sa_type=TZ)
+
+
+class AgentKey(SQLModel, table=True):
+    """Credential for an external AI agent (MCP / REST). Only the sha256 of the key is stored."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    allowance_id: int = Field(foreign_key="allowance.id", index=True)
+    name: str
+    key_prefix: str
+    key_hash: str = Field(index=True, unique=True)
+    per_purchase_cap: Optional[float] = None
+    created_at: datetime = Field(default_factory=utcnow, sa_type=TZ)
+    last_used_at: Optional[datetime] = Field(default=None, sa_type=TZ)
+    revoked_at: Optional[datetime] = Field(default=None, sa_type=TZ)
