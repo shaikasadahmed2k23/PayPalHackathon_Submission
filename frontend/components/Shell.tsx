@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useOnline, useWaking } from "@/lib/hooks";
 
 export function OfflineBadge() {
@@ -24,19 +23,9 @@ export function WakingBanner() {
   );
 }
 
-export function Shell({ title, children, back = true, wide = false }: { title?: string; children: React.ReactNode; back?: boolean; wide?: boolean }) {
+export function Shell({ children, wide = false }: { title?: string; children: React.ReactNode; back?: boolean; wide?: boolean }) {
   return (
-    <main className={`mx-auto flex min-h-dvh w-full flex-col gap-5 px-5 pb-16 pt-5 ${wide ? "max-w-6xl" : "max-w-md"}`}>
-      <header className="flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-2 text-lg font-bold tracking-tight">
-          <span className="inline-block h-3 w-3 rounded-full bg-accent" />
-          LeashPay
-        </Link>
-        <div className="flex items-center gap-3">
-          <OfflineBadge />
-          {back && title && <span className="label">{title}</span>}
-        </div>
-      </header>
+    <main className={`mx-auto flex min-h-[calc(100dvh-3.5rem)] w-full flex-col gap-5 px-5 pb-16 pt-5 ${wide ? "max-w-6xl" : "max-w-md"}`}>
       <WakingBanner />
       {children}
     </main>

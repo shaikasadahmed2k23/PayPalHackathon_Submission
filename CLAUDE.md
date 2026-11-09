@@ -165,3 +165,8 @@ Real-world shopping/scraping, NFC/Bluetooth, real INR/UPI, user auth/multi-user 
 ## Task 10 (live URLs, small fixes, submission docs)
 - Live: static site `https://leashpay-krgp.onrender.com` (`FRONTEND_URL` and `CORS_ORIGINS` in `render.yaml`), API `https://leashpay-api.onrender.com`. Old leashpay-web is suspended and no longer allowed by CORS.
 - `/health` answers GET and HEAD (uptime monitors). Submission docs: `README.md`, `docs/JUDGES.md`.
+
+## Branding + navigation
+- Icons are generated from `frontend/public/leashpay-icon.png` by `frontend/scripts/make_icons.py` (Pillow): `app/favicon.ico` (16/32/48, tight crop), `public/logo-mark.png` (header logo), icon-192/512 + apple-touch (12% padding), maskable 192/512 (inside the 80% safe circle). Icon URLs carry `?v=2` (layout metadata + manifest) so old cached icons are replaced; bump it when icons change.
+- `app/layout.tsx` title template `%s · LeashPay`; each route has a tiny `layout.tsx` with its title/description (client pages can't export metadata).
+- `components/AppNav.tsx` (in the root layout): sticky top bar (logo, links, "New allowance", OFFLINE badge) and, below 640px, a fixed bottom tab bar. The full-screen Show-to-Pay overlay is `z-50`, above the bars (`z-40`). `Shell` no longer draws its own header.

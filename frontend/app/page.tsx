@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { OfflineBadge } from "@/components/Shell";
 import { currentWallet } from "@/lib/store";
 
 function Card({ title, sub, onClick, href, primary = false }: { title: string; sub: string; onClick?: () => void; href?: string; primary?: boolean }) {
@@ -36,15 +35,7 @@ export default function Home() {
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-between px-6 pb-10 pt-6">
-      <header className="flex items-center justify-between">
-        <span className="flex items-center gap-2 text-lg font-bold tracking-tight">
-          <span className="inline-block h-3 w-3 rounded-full bg-accent" />
-          LeashPay
-        </span>
-        <OfflineBadge />
-      </header>
-
+    <main className="mx-auto flex min-h-[calc(100dvh-3.5rem)] w-full max-w-md flex-col justify-between px-6 pb-10 pt-6">
       <section className="py-8">
         <h1 className="text-[3.4rem] font-extrabold leading-[0.95] tracking-tighter">
           Your money,
