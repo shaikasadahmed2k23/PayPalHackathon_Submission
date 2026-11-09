@@ -46,6 +46,14 @@ def test_health_reports_dialect_not_url(monkeypatch):
     assert r.json() == {"status": "ok", "db": "sqlite"}
 
 
+def test_health_answers_head(monkeypatch):
+    from app import db
+
+    monkeypatch.setattr(db, "engine", make_engine("sqlite://"))
+    r = TestClient(main.app).head("/health")
+    assert r.status_code == 200
+
+
 def test_health_503_when_db_down(monkeypatch):
     def boom() -> str:
         raise RuntimeError("password=secret")

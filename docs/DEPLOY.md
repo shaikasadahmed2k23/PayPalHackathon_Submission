@@ -27,8 +27,8 @@ Why a static site: free static sites don't consume the 750 free instance hours a
 | `GEMINI_API_KEY`, `GROQ_API_KEY` | api | LLM keys (Groq is the fallback) |
 | `MERCHANT_PAYOUT_EMAIL` | api | Sandbox business account email that receives payouts |
 | `SERVER_SIGNING_KEY` | api | Output of `scripts/gen_signing_key.py` (**required**: the API refuses to start in production without it) |
-| `FRONTEND_URL` | api | Static site URL, `https://leashpay.onrender.com` (PayPal return redirect; preset in `render.yaml`) |
-| `CORS_ORIGINS` | api | Static site URL; comma-separate several (preset: `https://leashpay.onrender.com,https://leashpay-web.onrender.com`) |
+| `FRONTEND_URL` | api | Static site URL, `https://leashpay-krgp.onrender.com` (PayPal return redirect; preset in `render.yaml`) |
+| `CORS_ORIGINS` | api | Static site URL; comma-separate several (preset: `https://leashpay-krgp.onrender.com`) |
 | `APP_ENV`, `LLM_PROVIDER`, `LLM_FALLBACK` | api | Preset in `render.yaml` |
 | `NEXT_PUBLIC_API_URL` | **static site** | API URL, e.g. `https://leashpay-api.onrender.com` (**build-time**, see below) |
 
@@ -40,7 +40,8 @@ Why a static site: free static sites don't consume the 750 free instance hours a
 5. **Redeploy both** (Manual Deploy → *Deploy latest commit*; for the static site choose *Clear build cache & deploy*).
    `NEXT_PUBLIC_API_URL` is inlined into the JS bundle at build time, so the static site **must be rebuilt** whenever it changes. A plain restart won't pick it up.
 
-## 3b. Switching from the old `leashpay-web` node service to the static site
+## 3b. (Done) Switching from the old `leashpay-web` node service to the static site
+The switch is complete: the static site is `https://leashpay-krgp.onrender.com` (Render added the `-krgp` suffix) and the old service is suspended. Kept for reference if you redo it:
 Do these in order so nothing is down while you switch:
 1. Push the code. In Render, **New + → Blueprint** (or sync the existing Blueprint) so the static site `leashpay` is created. Set its `NEXT_PUBLIC_API_URL` to the API URL and deploy it. Note its URL.
 2. **leashpay-api** → Environment: `FRONTEND_URL` = the new site URL; `CORS_ORIGINS` = the new URL **and** the old `leashpay-web` URL, comma-separated. Save (the API redeploys).

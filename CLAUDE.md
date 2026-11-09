@@ -161,3 +161,7 @@ Real-world shopping/scraping, NFC/Bluetooth, real INR/UPI, user auth/multi-user 
 ## Deploy change: static frontend + auto-updating service worker
 - Frontend is a Next static export (`output: "export"`, `trailingSlash`, `images.unoptimized`); build output `frontend/out/`. Render: static site `leashpay` (see `render.yaml` + `docs/DEPLOY.md`), API stays a web service. PayPal return URL is `{FRONTEND_URL}/setup/return/?allowance_id=`.
 - `app/sw.ts`: HTML is NOT precached; navigations are NetworkFirst into cache `leashpay-pages` (warmed on install for `/ /wallet/ /merchant/ /setup/ /setup/return/ /agent/ /dashboard/`, slash-normalised, ignoreSearch). `skipWaiting` + `clientsClaim`; `components/SwUpdater.tsx` shows "LeashPay updated — reloading" and reloads once (30 s sessionStorage guard).
+
+## Task 10 (live URLs, small fixes, submission docs)
+- Live: static site `https://leashpay-krgp.onrender.com` (`FRONTEND_URL` and `CORS_ORIGINS` in `render.yaml`), API `https://leashpay-api.onrender.com`. Old leashpay-web is suspended and no longer allowed by CORS.
+- `/health` answers GET and HEAD (uptime monitors). Submission docs: `README.md`, `docs/JUDGES.md`.

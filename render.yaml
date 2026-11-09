@@ -38,9 +38,9 @@ services:
       - key: SERVER_SIGNING_KEY
         sync: false
       - key: FRONTEND_URL  # where PayPal sends the buyer back (the static site)
-        value: https://leashpay.onrender.com
-      - key: CORS_ORIGINS  # new static site + the old leashpay-web during the switch (remove it afterwards)
-        value: https://leashpay.onrender.com,https://leashpay-web.onrender.com
+        value: https://leashpay-krgp.onrender.com
+      - key: CORS_ORIGINS  # the static site only
+        value: https://leashpay-krgp.onrender.com
 
   - type: web
     name: leashpay

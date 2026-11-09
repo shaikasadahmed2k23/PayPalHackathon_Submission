@@ -89,7 +89,7 @@ async def paypal_error_handler(_: Request, exc: PayPalError) -> JSONResponse:
     )
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])  # uptime monitors often send HEAD
 def health() -> JSONResponse:
     """Render's health check: 200 only if the database answers. Reports the dialect, never the URL."""
     try:
