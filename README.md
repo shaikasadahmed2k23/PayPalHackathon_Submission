@@ -4,7 +4,7 @@
 A PayPal wallet where you write the spending rules in plain English and a deterministic Policy Judge enforces them, for an AI shopping agent, for any other AI agent you bring, and for offline Show-to-Pay vouchers that work with zero internet.
 
 - **Live demo:** https://leashpay-krgp.onrender.com (API: https://leashpay-api.onrender.com, first request may take 30-60 s to wake)
-- **3-minute video:** VIDEO_URL_HERE
+- **3-minute video:** https://youtu.be/qcrqrnr-hIM
 - **Judges:** a 5-minute guided path with only a laptop browser is in [docs/JUDGES.md](docs/JUDGES.md)
 - PayPal **Sandbox** only, USD. Built for the PayPal AI Hackathon.
 
@@ -209,3 +209,4 @@ More notes on vouchers and closing: [CLAUDE.md](CLAUDE.md) (full spec), [docs/DE
 ## License
 
 MIT, see [LICENSE](LICENSE).
+
